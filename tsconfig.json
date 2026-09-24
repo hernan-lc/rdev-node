@@ -22,17 +22,9 @@
     "declarationMap": false,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-    },
+      "@/*": ["./src/*"]
+    }
   },
-  "include": [
-    "tests/**/*.ts",
-    "examples/**/*.ts",
-  ],
-  "exclude": [
-    "node_modules",
-    "target",
-    "dist",
-    "build",
-  ],
+  "include": ["tests/**/*.ts", "examples/**/*.ts"],
+  "exclude": ["node_modules", "target", "dist", "build"]
 }

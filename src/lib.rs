@@ -5,8 +5,8 @@ pub mod enums;
 pub mod events;
 
 use napi::bindgen_prelude::Function;
-use napi::threadsafe_function::ThreadsafeFunctionCallMode;
-use napi::Result;
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::{Result, Status};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 use rdev::listen;
@@ -37,67 +37,147 @@ pub fn string_key_to_keycode(key: String) -> Option<KeyCode> {
   conversions::string_key_to_keycode(&key)
 }
 
-// Global display manager for X11 - keeps display open for simulation
-static DISPLAY_MANAGER: Lazy<Mutex<Option<DisplayManager>>> = Lazy::new(|| Mutex::new(None));
-
-/// Manages X11 display connection for event simulation
-pub struct DisplayManager {
-  // On Linux/X11, we need to keep the display open for simulation to work
-  // The display pointer is stored here to keep it alive
-  _display_ptr: usize, // Just a placeholder - rdev handles display internally
-}
-
-impl DisplayManager {
-  pub fn new() -> Result<Self> {
-    // Initialize by calling display_size which opens/closes a display
-    // This ensures X11 is properly initialized
-    rdev::display_size()
-      .map_err(|e| napi::Error::from_reason(format!("Failed to initialize display: {:?}", e)))?;
-
-    Ok(DisplayManager { _display_ptr: 0 })
-  }
-}
-
-/// Initialize the rdev simulation system. Call this once before using simulate_event.
+/// Checks that input simulation is available in the current environment.
+///
+/// `rdev` opens and closes its own display connection on every call, so no
+/// state is retained here; this is an explicit availability check. It succeeds
+/// when a display can be reached and fails otherwise (for example with a
+/// `NoDisplay` error on headless Linux without an X server).
 #[napi]
 pub fn init_simulation() -> Result<()> {
-  let mut manager = DISPLAY_MANAGER
-    .lock()
-    .map_err(|e| napi::Error::from_reason(format!("Failed to lock display manager: {:?}", e)))?;
-
-  if manager.is_none() {
-    *manager = Some(DisplayManager::new()?);
-  }
-
-  Ok(())
+  rdev::display_size()
+    .map(|_| ())
+    .map_err(|e| napi::Error::from_reason(format!("Input simulation is not available: {e:?}")))
 }
 
 /// Get the size of the main display
 #[napi]
 pub fn get_display_size() -> Result<DisplaySize> {
   let (width, height) = rdev::display_size()
-    .map_err(|e| napi::Error::from_reason(format!("Failed to get display size: {:?}", e)))?;
+    .map_err(|e| napi::Error::from_reason(format!("Failed to get display size: {e:?}")))?;
   Ok(DisplaySize {
     width: width as f64,
     height: height as f64,
   })
 }
 
-/// Start listening for input events
-#[napi]
-pub fn start_listener(callback: Function<InputEvent, InputEvent>) -> Result<()> {
-  let tsfn = callback.build_threadsafe_function().build()?;
+/// Threadsafe bridge delivering input events to JavaScript.
+/// Built with default (strong) references so an active listener keeps the
+/// Node.js event loop alive until it is stopped or fails.
+type EventTsfn = ThreadsafeFunction<InputEvent, (), InputEvent, Status, false>;
+/// Threadsafe bridge delivering listener failures to JavaScript.
+type ErrorTsfn = ThreadsafeFunction<String, (), String, Status, false>;
 
-  std::thread::spawn(move || {
-    if let Err(error) = listen(move |event| {
-      let event: InputEvent = event.into();
-      tsfn.call(event, ThreadsafeFunctionCallMode::NonBlocking);
-    }) {
-      eprintln!("Error: {:?}", error);
-    }
+struct ListenerState {
+  generation: u64,
+  events: EventTsfn,
+  errors: Option<ErrorTsfn>,
+}
+
+#[derive(Default)]
+struct ListenerSlot {
+  next_generation: u64,
+  active: Option<ListenerState>,
+}
+
+static LISTENER: Lazy<Mutex<ListenerSlot>> = Lazy::new(|| Mutex::new(ListenerSlot::default()));
+
+/// Start listening for input events.
+///
+/// The callback's return value is ignored. Only one listener may run at a
+/// time; calling this while a listener is active returns an error.
+///
+/// Failures of the underlying `rdev::listen` loop (for example no X display on
+/// Linux) are reported through `on_error` when provided, and the listener is
+/// released. Without `on_error` they are written to stderr.
+///
+/// The listener holds the Node.js event loop alive until `stopListener()` is
+/// called or the listen loop fails. Note: `rdev` 0.5.3 offers no way to unhook
+/// the OS listener, so after stopping, the blocked native thread lingers until
+/// process exit; it no longer delivers events and no longer keeps the process
+/// alive.
+#[napi]
+pub fn start_listener(
+  callback: Function<InputEvent, ()>,
+  on_error: Option<Function<String, ()>>,
+) -> Result<()> {
+  let mut slot = LISTENER
+    .lock()
+    .map_err(|e| napi::Error::from_reason(format!("Failed to lock listener state: {e:?}")))?;
+  if slot.active.is_some() {
+    return Err(napi::Error::from_reason(
+      "Listener is already running. Call stopListener() before starting a new one.",
+    ));
+  }
+
+  let events: EventTsfn = callback.build_threadsafe_function().build()?;
+  let errors: Option<ErrorTsfn> = on_error
+    .map(|f| f.build_threadsafe_function().build())
+    .transpose()?;
+
+  let generation = slot.next_generation;
+  slot.next_generation = slot.next_generation.wrapping_add(1);
+  slot.active = Some(ListenerState {
+    generation,
+    events,
+    errors,
   });
+  drop(slot);
+
+  std::thread::Builder::new()
+    .name("rdev-node-listener".into())
+    .spawn(move || {
+      if let Err(error) = listen(move |event| {
+        let event: InputEvent = event.into();
+        if let Ok(slot) = LISTENER.lock() {
+          let current = slot.active.as_ref().filter(|s| s.generation == generation);
+          if let Some(state) = current {
+            state
+              .events
+              .call(event, ThreadsafeFunctionCallMode::NonBlocking);
+          }
+        }
+      }) {
+        let message = format!("Input listener failed: {error:?}");
+        match LISTENER.lock() {
+          Ok(mut slot) => {
+            let ours = slot
+              .active
+              .as_ref()
+              .is_some_and(|s| s.generation == generation);
+            if ours {
+              if let Some(state) = slot.active.as_ref() {
+                if let Some(errors) = state.errors.as_ref() {
+                  errors.call(message, ThreadsafeFunctionCallMode::NonBlocking);
+                } else {
+                  eprintln!("{message}");
+                }
+              }
+              // Release the bridges so queued callbacks drain and the event
+              // loop is no longer held alive. This thread exits here.
+              slot.active = None;
+            }
+          }
+          Err(_) => eprintln!("{message}"),
+        }
+      }
+    })
+    .map_err(|e| napi::Error::from_reason(format!("Failed to spawn listener thread: {e}")))?;
 
   Ok(())
+}
+
+/// Stop the active input event listener, if any.
+///
+/// Returns `true` when a listener was running and is now stopped. After
+/// stopping, the event loop is no longer held alive and `startListener()` may
+/// be called again. See `startListener()` for the lingering-thread limitation.
+#[napi]
+pub fn stop_listener() -> bool {
+  LISTENER
+    .lock()
+    .map(|mut slot| slot.active.take().is_some())
+    .unwrap_or(false)
 }
 
 /// Simulate an input event
@@ -105,8 +185,8 @@ pub fn start_listener(callback: Function<InputEvent, InputEvent>) -> Result<()> 
 pub fn simulate_event(event: InputEvent) -> Result<()> {
   let rdev_event: rdev::Event = event
     .try_into()
-    .map_err(|e| napi::Error::from_reason(format!("Invalid event data: {}", e)))?;
+    .map_err(|e| napi::Error::from_reason(format!("Invalid event data: {e}")))?;
   rdev::simulate(&rdev_event.event_type)
-    .map_err(|e| napi::Error::from_reason(format!("Failed to simulate event: {:?}", e)))?;
+    .map_err(|e| napi::Error::from_reason(format!("Failed to simulate event: {e:?}")))?;
   Ok(())
 }

@@ -5,21 +5,8 @@
   "main": "index.js",
   "repository": "https://github.com/nglmercer/rdev-node",
   "license": "MIT",
-  "keywords": [
-    "napi-rs",
-    "NAPI",
-    "N-API",
-    "Rust",
-    "node-addon",
-    "node-addon-api",
-    "node-rdev",
-    "rdev"
-  ],
-  "files": [
-    "index.d.ts",
-    "index.js",
-    "*.node"
-  ],
+  "keywords": ["napi-rs", "NAPI", "N-API", "Rust", "node-addon", "node-addon-api", "node-rdev", "rdev"],
+  "files": ["index.d.ts", "index.js", "*.node"],
   "napi": {
     "binaryName": "node-rdev",
     "targets": [
@@ -31,13 +18,11 @@
       "i686-pc-windows-msvc",
       "armv7-unknown-linux-gnueabihf",
       "aarch64-apple-darwin",
-      "aarch64-linux-android",
-      "aarch64-pc-windows-msvc",
-      "armv7-linux-androideabi"
+      "aarch64-pc-windows-msvc"
     ]
   },
   "engines": {
-    "node": ">= 10"
+    "node": ">=20.3.0"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
@@ -45,10 +30,12 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --pipe \"biome format --write\"",
-    "build:debug": "napi build --platform --pipe \"biome format --write\"",
+    "build": "napi build --platform --release && node scripts/strip-android.cjs",
+    "build:debug": "napi build --platform && node scripts/strip-android.cjs",
     "format": "biome format --write . && cargo fmt && taplo format",
-    "lint": "biome check --write .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
     "test": "node --test tests/complete.test.cjs",
     "test:all": "node --test tests/*.test.cjs",
     "version": "napi version"
@@ -61,14 +48,8 @@
     "typescript": "^5.7.2"
   },
   "lint-staged": {
-    "*.@(js|ts|tsx)": [
-      "biome check --write"
-    ],
-    "*.@(js|ts|tsx|yml|yaml|md|json)": [
-      "biome format --write"
-    ],
-    "*.toml": [
-      "taplo format"
-    ]
+    "*.@(js|ts|tsx)": ["biome check --write"],
+    "*.@(js|ts|tsx|yml|yaml|md|json)": ["biome format --write"],
+    "*.toml": ["taplo format"]
   }
 }

@@ -4,8 +4,7 @@ env:
   APP_NAME: node-rdev
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 on:
   push:
     branches:
@@ -62,21 +61,21 @@ jobs:
     name: stable - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@f4d14e03ff726c06358e5557344e1da148b56cf7 # v1
         with:
           bun-version: latest
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry/index/
@@ -84,17 +83,17 @@ jobs:
             ~/.cargo/git/db/
             .cargo-cache
             target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
@@ -105,10 +104,10 @@ jobs:
     name: stable - aarch64-unknown-linux-gnu
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: arm64
 
@@ -136,12 +135,12 @@ jobs:
               source $HOME/.cargo/env
               
               # Install dependencies and build
-              $HOME/.bun/bin/bun install
+              $HOME/.bun/bin/bun install --frozen-lockfile
               $HOME/.bun/bin/bun run build --target aarch64-unknown-linux-gnu
             '
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: ${{ env.APP_NAME }}.*.node
@@ -152,10 +151,10 @@ jobs:
     name: stable - armv7-unknown-linux-gnueabihf
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: arm
 
@@ -177,7 +176,8 @@ jobs:
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
               source $HOME/.cargo/env
               
-              # Install dependencies using npm (bun not available on ARM32)
+              # Install dependencies using npm (bun not available on ARM32, so the
+              # frozen bun.lock cannot be used here)
               npm install
               
               # Build using napi-rs cli directly
@@ -185,7 +185,7 @@ jobs:
             '
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bindings-armv7-unknown-linux-gnueabihf
           path: ${{ env.APP_NAME }}.*.node
@@ -198,7 +198,7 @@ jobs:
     container:
       image: node:20-alpine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install build dependencies
         run: |
@@ -222,6 +222,8 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
 
       - name: Install dependencies
+        # npm: bun needs glibc and cannot run on Alpine/musl, so the frozen
+        # bun.lock cannot be used here.
         run: |
           source $HOME/.cargo/env
           npm install
@@ -235,7 +237,7 @@ jobs:
           echo "=== Built artifacts ==="
           ls -la *.node || echo "No .node files found"
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bindings-x86_64-unknown-linux-musl
           path: ${{ env.APP_NAME }}.*.node
@@ -251,6 +253,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Note: aarch64-pc-windows-msvc is built (see the build matrix above)
+        # but intentionally not runtime-tested here: it is build-only because
+        # there is no reliable GitHub-hosted Windows ARM64 test setup for this
+        # project's toolchain (bun has no Windows ARM64 support).
         settings:
           - host: windows-latest
             target: x86_64-pc-windows-msvc
@@ -285,23 +291,23 @@ jobs:
           - '22'
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node.js
         if: ${{ !matrix.settings.docker }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
           architecture: ${{ matrix.settings.architecture }}
 
       - name: Setup Bun
         if: ${{ !matrix.settings.docker && !matrix.settings.no_bun }}
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@f4d14e03ff726c06358e5557344e1da148b56cf7 # v1
         with:
           bun-version: latest
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: bindings-${{ matrix.settings.target }}
           path: .
@@ -310,21 +316,21 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         run: |
           if [ "${{ matrix.settings.host }}" = "windows-latest" ]; then
-            bun install
+            bun install --frozen-lockfile
             bun run test
           elif [ "${{ matrix.settings.host }}" = "macos-latest" ]; then
-            npm install
-            npm run test
+            bun install --frozen-lockfile
+            bun run test
           else
             sudo apt-get update && sudo apt-get install -y xvfb xauth
-            npm install
-            xvfb-run npm run test
+            bun install --frozen-lockfile
+            xvfb-run bun run test
           fi
         shell: bash
 
       - name: Set up QEMU
         if: ${{ matrix.settings.docker && matrix.settings.platform }}
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: ${{ matrix.settings.platform }}
 
@@ -350,13 +356,14 @@ jobs:
             fi
             
             if [ \"${{ matrix.settings.no_bun }}\" = \"true\" ]; then
+              # npm: bun is unavailable on ARM32, so the frozen bun.lock cannot be used here.
               npm install
               xvfb-run npm run test
             else
               curl -fsSL https://bun.sh/install | bash
               export BUN_INSTALL=\"\$HOME/.bun\"
               export PATH=\"\$BUN_INSTALL/bin:\$PATH\"
-              bun install
+              bun install --frozen-lockfile
               xvfb-run bun run test
             fi
           "
@@ -365,12 +372,14 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: bindings-*
           path: release-binaries
@@ -379,13 +388,13 @@ jobs:
         run: ls -R release-binaries
         shell: bash
       - name: Upload flat artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: all-binaries
           path: release-binaries
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: release-binaries/*.node
           generate_release_notes: true

@@ -11,7 +11,7 @@ pub enum ButtonType {
 
 /// Represents keyboard keys
 #[napi(string_enum)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyCode {
   Alt,
   AltGr,

@@ -14,8 +14,6 @@
       "**/.git/**",
       "**/coverage/**",
       "**/build/**",
-      "**/examples/**",
-      "**/tests/**",
       "index.js",
       "index.d.ts"
     ]

@@ -1,4 +1,4 @@
-import { startListener, EventTypeValue, KeyCode, stringKeyToKeycode } from '../index'
+import { EventTypeValue, type KeyCode, startListener, stringKeyToKeycode } from '../index'
 
 /**
  * A simple but effective Shortcut Manager
@@ -15,7 +15,6 @@ class ShortcutManager {
       } else if (event.eventType === EventTypeValue.KeyRelease && event.keyRelease) {
         this.pressedKeys.delete(event.keyRelease.key)
       }
-      return event
     })
   }
 
@@ -23,12 +22,14 @@ class ShortcutManager {
    * Register a shortcut like "Ctrl+Shift+S"
    */
   register(combo: string, callback: () => void) {
-    const parts = combo.split('+').map(p => p.trim())
-    const normalizedParts = parts.map(p => {
-      const code = stringKeyToKeycode(p)
-      if (!code) throw new Error(`Invalid key: ${p}`)
-      return code
-    }).sort()
+    const parts = combo.split('+').map((p) => p.trim())
+    const normalizedParts = parts
+      .map((p) => {
+        const code = stringKeyToKeycode(p)
+        if (!code) throw new Error(`Invalid key: ${p}`)
+        return code
+      })
+      .sort()
 
     this.shortcuts.set(normalizedParts.join(','), callback)
     console.log(`Registered shortcut: ${combo}`)

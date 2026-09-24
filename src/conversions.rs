@@ -87,7 +87,7 @@ pub fn string_key_to_keycode(key: &str) -> Option<KeyCode> {
     "left" | "leftarrow" => Some(KeyCode::LeftArrow),
     "right" | "rightarrow" => Some(KeyCode::RightArrow),
     // Modifier keys
-    "ctrl" | "controll" | "controlleft" => Some(KeyCode::ControlLeft),
+    "ctrl" | "control" | "controll" | "controlleft" => Some(KeyCode::ControlLeft),
     "ctrlr" | "controlr" | "controlright" => Some(KeyCode::ControlRight),
     "shift" | "shiftl" | "shiftleft" => Some(KeyCode::ShiftLeft),
     "shiftr" | "shiftright" => Some(KeyCode::ShiftRight),
@@ -518,5 +518,50 @@ impl TryFrom<InputEvent> for Event {
         .checked_add(std::time::Duration::from_millis(event.time as u64))
         .unwrap_or(std::time::SystemTime::now()),
     })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn control_alias_maps_to_control_left() {
+    assert_eq!(string_key_to_keycode("control"), Some(KeyCode::ControlLeft));
+  }
+
+  #[test]
+  fn control_alias_is_case_insensitive() {
+    assert_eq!(string_key_to_keycode("Control"), Some(KeyCode::ControlLeft));
+    assert_eq!(string_key_to_keycode("CONTROL"), Some(KeyCode::ControlLeft));
+  }
+
+  #[test]
+  fn legacy_controll_typo_kept_for_compatibility() {
+    assert_eq!(
+      string_key_to_keycode("controll"),
+      Some(KeyCode::ControlLeft)
+    );
+  }
+
+  #[test]
+  fn other_control_aliases_still_map() {
+    for alias in ["ctrl", "controlleft"] {
+      assert_eq!(
+        string_key_to_keycode(alias),
+        Some(KeyCode::ControlLeft),
+        "alias {alias} should map to ControlLeft"
+      );
+    }
+    assert_eq!(
+      string_key_to_keycode("controlright"),
+      Some(KeyCode::ControlRight)
+    );
+  }
+
+  #[test]
+  fn unknown_keys_map_to_none() {
+    assert_eq!(string_key_to_keycode("not-a-key"), None);
+    assert_eq!(string_key_to_keycode(""), None);
   }
 }

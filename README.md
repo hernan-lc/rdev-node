@@ -11,18 +11,30 @@ npm install rdev-node
 ## Quick Start
 
 ```javascript
-const { startListener } = require('rdev-node');
+const { startListener, stopListener } = require('rdev-node');
 
 startListener((event) => {
   console.log(event);
 });
+
+// Later: detach the listener so the process can exit.
+stopListener();
 ```
 
 ## Requirements
 
-- Node.js >= 10
+- Node.js >= 20.3.0 (N-API 9)
 - **Rust** (required to build from source) - Install from [rustup.rs](https://rustup.rs/)
-- Linux: `libgtk-3-dev libxtst-dev`
+- Linux (X11): build tools plus `libx11-dev libxtst-dev libxi-dev libxext-dev libxfixes-dev libxrender-dev pkg-config`
+  (Alpine/musl: `build-base musl-dev libx11-dev libxtst-dev libxi-dev libxext-dev libxfixes-dev libxrender-dev pkgconfig`).
+  At runtime the matching shared libraries must be present
+  (`libx11-6 libxtst6 libxi6 libxext6 libxfixes3 libxrender1` on Debian/Ubuntu,
+  `libx11 libxtst libxi libxext libxfixes libxrender` on Alpine).
+
+## Platform Notes
+
+- **Linux**: X11 only; Wayland is not supported by `rdev`. A running X server is required — use `Xvfb` (`xvfb-run`) in headless environments such as CI. Under XWayland, capture/simulation may be limited or unreliable (XTEST-injected events are not reliably visible to XRECORD), so the loopback integration test is skipped there.
+- **macOS**: the app/terminal running Node needs **Accessibility** permission (System Settings → Privacy & Security → Accessibility) to receive key events, and **Input Monitoring** approval where prompted.
 
 ## Build
 
@@ -33,17 +45,30 @@ npm run build
 
 ## API
 
-### startListener(callback)
+### startListener(callback, onError?)
 
-Listen to keyboard and mouse events.
+Listen to keyboard and mouse events. The callback's return value is ignored. Only one listener may run at a time.
 
 ```javascript
-startListener((event) => {
-  console.log('Type:', event.eventType);
-  if (event.keyPress) console.log('Key:', event.keyPress.key);
-  if (event.mouseMove) console.log('Position:', event.mouseMove.x, event.mouseMove.y);
-});
+startListener(
+  (event) => {
+    console.log('Type:', event.eventType);
+    if (event.keyPress) console.log('Key:', event.keyPress.key);
+    if (event.mouseMove) console.log('Position:', event.mouseMove.x, event.mouseMove.y);
+  },
+  (message) => {
+    console.error('Listener failed:', message);
+  },
+);
 ```
+
+### stopListener()
+
+Stop the active listener, if any. Returns `true` when a listener was running and is now stopped. After stopping, the event loop is no longer held alive and `startListener()` may be called again. Note: `rdev` offers no way to unhook the OS listener, so the blocked native thread lingers until process exit; it no longer delivers events.
+
+### initSimulation()
+
+Check that input simulation is available in the current environment (for example, that an X display can be reached on Linux). `rdev` manages its own display connections, so no state is retained — this is an explicit availability check. Throws when unavailable.
 
 ### simulateEvent(event)
 
@@ -68,9 +93,10 @@ const { width, height } = getDisplaySize();
 ## Supported Platforms
 
 - macOS (x64, arm64)
-- Windows (x64, ia32, arm64)
-- Linux (x64, arm64, armv7)
-- Android (arm64, armv7)
+- Windows (x64, ia32; arm64 is build-only, not runtime-tested in CI)
+- Linux (x64 gnu + musl, arm64, armv7)
+
+Android is not supported (`rdev` has no Android backend).
 
 ## License
 

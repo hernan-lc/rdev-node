@@ -1,9 +1,10 @@
 const { test, describe, before } = require('node:test')
 const assert = require('node:assert')
+const { spawnSync } = require('node:child_process')
+const path = require('node:path')
 const rdev = require('../index.js')
 
 describe('rdev-node Complete Test Suite', () => {
-  
   describe('Binding & API Surface', () => {
     test('all core functions are exported and are functions', () => {
       const functions = [
@@ -13,7 +14,8 @@ describe('rdev-node Complete Test Suite', () => {
         'normalizeKeyName',
         'simulateEvent',
         'startListener',
-        'stringKeyToKeycode'
+        'stopListener',
+        'stringKeyToKeycode',
       ]
       for (const fn of functions) {
         assert.strictEqual(typeof rdev[fn], 'function', `Missing function: ${fn}`)
@@ -51,23 +53,31 @@ describe('rdev-node Complete Test Suite', () => {
 
   describe('Utility Functions - isModifierKey', () => {
     const modifiers = [
-      rdev.KeyCode.ControlLeft, rdev.KeyCode.ControlRight,
-      rdev.KeyCode.ShiftLeft, rdev.KeyCode.ShiftRight,
-      rdev.KeyCode.Alt, rdev.KeyCode.AltGr,
-      rdev.KeyCode.MetaLeft, rdev.KeyCode.MetaRight
+      rdev.KeyCode.ControlLeft,
+      rdev.KeyCode.ControlRight,
+      rdev.KeyCode.ShiftLeft,
+      rdev.KeyCode.ShiftRight,
+      rdev.KeyCode.Alt,
+      rdev.KeyCode.AltGr,
+      rdev.KeyCode.MetaLeft,
+      rdev.KeyCode.MetaRight,
     ]
-    
-    modifiers.forEach(key => {
+
+    for (const key of modifiers) {
       test(`${key} is a modifier`, () => assert.strictEqual(rdev.isModifierKey(key), true))
-    })
+    }
 
     const nonModifiers = [
-      rdev.KeyCode.KeyA, rdev.KeyCode.Space, rdev.KeyCode.F1,
-      rdev.KeyCode.Escape, rdev.KeyCode.Return, rdev.KeyCode.Backspace
+      rdev.KeyCode.KeyA,
+      rdev.KeyCode.Space,
+      rdev.KeyCode.F1,
+      rdev.KeyCode.Escape,
+      rdev.KeyCode.Return,
+      rdev.KeyCode.Backspace,
     ]
-    nonModifiers.forEach(key => {
+    for (const key of nonModifiers) {
       test(`${key} is NOT a modifier`, () => assert.strictEqual(rdev.isModifierKey(key), false))
-    })
+    }
   })
 
   describe('Utility Functions - normalizeKeyName', () => {
@@ -93,20 +103,23 @@ describe('rdev-node Complete Test Suite', () => {
   describe('Utility Functions - stringKeyToKeycode', () => {
     test('mapping common aliases', () => {
       const cases = {
-        'a': rdev.KeyCode.KeyA,
-        'keya': rdev.KeyCode.KeyA,
-        '1': rdev.KeyCode.Num1,
-        'num1': rdev.KeyCode.Num1,
-        'esc': rdev.KeyCode.Escape,
-        'escape': rdev.KeyCode.Escape,
-        'enter': rdev.KeyCode.Return,
-        'return': rdev.KeyCode.Return,
-        'ctrl': rdev.KeyCode.ControlLeft,
-        'controlleft': rdev.KeyCode.ControlLeft,
-        'shift': rdev.KeyCode.ShiftLeft,
-        'alt': rdev.KeyCode.Alt,
-        'up': rdev.KeyCode.UpArrow,
-        'uparrow': rdev.KeyCode.UpArrow
+        a: rdev.KeyCode.KeyA,
+        keya: rdev.KeyCode.KeyA,
+        1: rdev.KeyCode.Num1,
+        num1: rdev.KeyCode.Num1,
+        esc: rdev.KeyCode.Escape,
+        escape: rdev.KeyCode.Escape,
+        enter: rdev.KeyCode.Return,
+        return: rdev.KeyCode.Return,
+        ctrl: rdev.KeyCode.ControlLeft,
+        control: rdev.KeyCode.ControlLeft,
+        controll: rdev.KeyCode.ControlLeft,
+        controlleft: rdev.KeyCode.ControlLeft,
+        controlright: rdev.KeyCode.ControlRight,
+        shift: rdev.KeyCode.ShiftLeft,
+        alt: rdev.KeyCode.Alt,
+        up: rdev.KeyCode.UpArrow,
+        uparrow: rdev.KeyCode.UpArrow,
       }
       for (const [input, expected] of Object.entries(cases)) {
         assert.strictEqual(rdev.stringKeyToKeycode(input), expected, `Failed mapping ${input}`)
@@ -174,14 +187,33 @@ describe('rdev-node Complete Test Suite', () => {
 
     const now = Date.now()
     const testEvents = [
-      { name: 'Key Press', data: { eventType: rdev.EventTypeValue.KeyPress, keyPress: { key: rdev.KeyCode.KeyB }, time: now } },
-      { name: 'Key Release', data: { eventType: rdev.EventTypeValue.KeyRelease, keyRelease: { key: rdev.KeyCode.KeyB }, time: now + 5 } },
-      { name: 'Mouse Move', data: { eventType: rdev.EventTypeValue.MouseMove, mouseMove: { x: 50, y: 50 }, time: now + 10 } },
-      { name: 'Button Press', data: { eventType: rdev.EventTypeValue.ButtonPress, buttonPress: { button: rdev.ButtonType.Right }, time: now + 15 } },
-      { name: 'Wheel', data: { eventType: rdev.EventTypeValue.Wheel, wheel: { deltaX: 5, deltaY: -5 }, time: now + 20 } }
+      {
+        name: 'Key Press',
+        data: { eventType: rdev.EventTypeValue.KeyPress, keyPress: { key: rdev.KeyCode.KeyB }, time: now },
+      },
+      {
+        name: 'Key Release',
+        data: { eventType: rdev.EventTypeValue.KeyRelease, keyRelease: { key: rdev.KeyCode.KeyB }, time: now + 5 },
+      },
+      {
+        name: 'Mouse Move',
+        data: { eventType: rdev.EventTypeValue.MouseMove, mouseMove: { x: 50, y: 50 }, time: now + 10 },
+      },
+      {
+        name: 'Button Press',
+        data: {
+          eventType: rdev.EventTypeValue.ButtonPress,
+          buttonPress: { button: rdev.ButtonType.Right },
+          time: now + 15,
+        },
+      },
+      {
+        name: 'Wheel',
+        data: { eventType: rdev.EventTypeValue.Wheel, wheel: { deltaX: 5, deltaY: -5 }, time: now + 20 },
+      },
     ]
 
-    testEvents.forEach(({ name, data }) => {
+    for (const { name, data } of testEvents) {
       test(`simulateEvent: ${name}`, (t) => {
         if (!simulationInitialized) {
           t.skip('No display available')
@@ -189,39 +221,82 @@ describe('rdev-node Complete Test Suite', () => {
         }
         assert.doesNotThrow(() => rdev.simulateEvent(data))
       })
-    })
+    }
 
     test('simulateEvent validation - missing keyPress', (t) => {
       if (!simulationInitialized) {
         t.skip('No display available')
         return
       }
-      assert.throws(() => {
-        rdev.simulateEvent({ eventType: rdev.EventTypeValue.KeyPress, time: now })
-      }, { message: /Missing key_press/ })
+      assert.throws(
+        () => {
+          rdev.simulateEvent({ eventType: rdev.EventTypeValue.KeyPress, time: now })
+        },
+        { message: /Missing key_press/ },
+      )
     })
 
     test('simulateEvent validation - missing mouseMove', (t) => {
-        if (!simulationInitialized) {
-          t.skip('No display available')
-          return
-        }
-        assert.throws(() => {
+      if (!simulationInitialized) {
+        t.skip('No display available')
+        return
+      }
+      assert.throws(
+        () => {
           rdev.simulateEvent({ eventType: rdev.EventTypeValue.MouseMove, time: now })
-        }, { message: /Missing mouse_move/ })
-      })
+        },
+        { message: /Missing mouse_move/ },
+      )
+    })
   })
 
   describe('Listener API', () => {
-    test.skip('startListener returns undefined and spawns thread (non-blocking test)', () => {
-      // This test is skipped because it spawns a persistent background thread 
-      // that prevents the Node.js test runner from exiting cleanly.
+    test('stopListener reports false when nothing is running', () => {
+      assert.strictEqual(rdev.stopListener(), false)
+    })
+
+    test('startListener guards duplicates and stopListener releases', (t) => {
       try {
-        const result = rdev.startListener((ev) => ev)
-        assert.strictEqual(result, undefined)
+        rdev.initSimulation()
       } catch (e) {
-        console.log('Listener notice: ' + e.message)
+        t.skip(`No display available: ${e.message}`)
+        return
       }
+      const errors = []
+      const result = rdev.startListener(
+        () => {},
+        (message) => errors.push(message),
+      )
+      assert.strictEqual(result, undefined)
+      assert.throws(() => rdev.startListener(() => {}), { message: /already running/ })
+      assert.strictEqual(rdev.stopListener(), true)
+      assert.strictEqual(rdev.stopListener(), false)
+      assert.deepStrictEqual(errors, [])
+    })
+
+    test('listener receives a simulated event (child process)', { timeout: 120000 }, (t) => {
+      const child = path.join(__dirname, 'listener-child.cjs')
+      // Generous outer timeout: the child always exits by itself within 15s;
+      // this only guards against a stalled runner killing the suite.
+      const proc = spawnSync(process.execPath, [child], {
+        encoding: 'utf8',
+        timeout: 60000,
+      })
+      if (proc.error) {
+        assert.fail(`listener child failed to run: ${proc.error.message}`)
+      }
+      const output = `${proc.stdout}${proc.stderr}`
+      if (output.includes('SKIP:')) {
+        t.skip(
+          output
+            .trim()
+            .split('\n')
+            .find((line) => line.includes('SKIP:')),
+        )
+        return
+      }
+      assert.strictEqual(proc.status, 0, `listener child exited ${proc.status}: ${output}`)
+      assert.ok(output.includes('RECEIVED'), `listener child never saw the event: ${output}`)
     })
   })
 })

@@ -1,4 +1,4 @@
-import { startListener, EventTypeValue, normalizeKeyName } from '../index'
+import { EventTypeValue, normalizeKeyName, startListener } from '../index'
 
 console.log('--- rdev-node Logger ---')
 console.log('Listening for all input events. Press Ctrl+C to stop.\n')
@@ -8,9 +8,11 @@ startListener((event) => {
   let detail = ''
 
   switch (event.eventType) {
-    case EventTypeValue.KeyPress:
-      detail = `Key: ${event.keyPress?.key} (Normalized: ${normalizeKeyName(event.keyPress!.key)})`
+    case EventTypeValue.KeyPress: {
+      const key = event.keyPress?.key
+      detail = key ? `Key: ${key} (Normalized: ${normalizeKeyName(key)})` : 'Key: (no data)'
       break
+    }
     case EventTypeValue.KeyRelease:
       detail = `Key: ${event.keyRelease?.key}`
       break
@@ -29,5 +31,4 @@ startListener((event) => {
   }
 
   console.log(`[${time}] ${event.eventType.padEnd(15)} | ${detail}`)
-  return event
 })
