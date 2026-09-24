@@ -112,7 +112,6 @@ dist
 #Added by cargo
 
 /target
-Cargo.lock
 
 *.node
 .pnp.*
@@ -124,4 +123,3 @@ Cargo.lock
 !.yarn/versions
 
 .history
-bun.lock
