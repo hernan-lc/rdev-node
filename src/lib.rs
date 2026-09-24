@@ -4,6 +4,8 @@ pub mod conversions;
 pub mod enums;
 pub mod events;
 #[cfg(target_os = "linux")]
+mod linux_outputs;
+#[cfg(target_os = "linux")]
 mod linux_wayland;
 
 use napi::bindgen_prelude::Function;

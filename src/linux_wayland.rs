@@ -302,7 +302,10 @@ fn create_virtual_device() -> Result<VirtualDevice, String> {
 }
 
 fn move_pointer(device: &mut VirtualDevice, x: f64, y: f64) -> Result<(), String> {
-  let (width, height) = display_size()?;
+  // Pointer queries below use XWayland coordinates, which may differ from
+  // native Wayland logical output sizes when displays are scaled.
+  let (width, height) =
+    rdev::display_size().map_err(|e| format!("XWayland pointer geometry is unavailable: {e:?}"))?;
   if !x.is_finite()
     || !y.is_finite()
     || x < 0.0
@@ -385,7 +388,7 @@ pub fn simulate(event: EventType) -> Result<(), String> {
 }
 
 pub fn display_size() -> Result<(u64, u64), String> {
-  rdev::display_size().map_err(|e| format!("XWayland display size is unavailable: {e:?}"))
+  crate::linux_outputs::display_size()
 }
 
 #[cfg(test)]
