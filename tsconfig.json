@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
+    "types": ["node", "bun"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
@@ -20,7 +21,6 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": false,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

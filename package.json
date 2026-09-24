@@ -3,10 +3,32 @@
   "version": "1.0.1",
   "description": "node version of rdev",
   "main": "index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.js"
+    }
+  },
   "repository": "https://github.com/nglmercer/rdev-node",
   "license": "MIT",
-  "keywords": ["napi-rs", "NAPI", "N-API", "Rust", "node-addon", "node-addon-api", "node-rdev", "rdev"],
-  "files": ["index.d.ts", "index.js", "*.node"],
+  "keywords": [
+    "napi-rs",
+    "NAPI",
+    "N-API",
+    "Rust",
+    "node-addon",
+    "node-addon-api",
+    "node-rdev",
+    "rdev"
+  ],
+  "files": [
+    "index.js",
+    "index.mjs",
+    "index.d.ts",
+    "*.node"
+  ],
   "napi": {
     "binaryName": "node-rdev",
     "targets": [
@@ -30,26 +52,32 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release && node scripts/strip-android.cjs",
-    "build:debug": "napi build --platform && node scripts/strip-android.cjs",
+    "build": "napi build --platform --release --commonjs --js index.js && napi build --platform --release --esm --js index.mjs",
+    "build:debug": "napi build --platform --commonjs --js index.js && napi build --platform --esm --js index.mjs",
     "format": "biome format --write . && cargo fmt && taplo format",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/complete.test.cjs",
-    "test:all": "node --test tests/*.test.cjs",
+    "test:all": "node --test tests/*.test.cjs tests/*.test.mjs",
     "version": "napi version"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.9.4",
-    "@napi-rs/cli": "^3.5.1",
-    "@types/bun": "^1.1.5",
-    "@types/node": "^22.10.5",
-    "typescript": "^5.7.2"
+    "@biomejs/biome": "^2.5.14",
+    "@napi-rs/cli": "^3.10.5",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
   },
   "lint-staged": {
-    "*.@(js|ts|tsx)": ["biome check --write"],
-    "*.@(js|ts|tsx|yml|yaml|md|json)": ["biome format --write"],
-    "*.toml": ["taplo format"]
+    "*.@(js|ts|tsx)": [
+      "biome check --write"
+    ],
+    "*.@(js|ts|tsx|yml|yaml|md|json)": [
+      "biome format --write"
+    ],
+    "*.toml": [
+      "taplo format"
+    ]
   }
 }

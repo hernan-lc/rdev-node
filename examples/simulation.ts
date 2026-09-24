@@ -1,4 +1,4 @@
-import { ButtonType, EventTypeValue, KeyCode, getDisplaySize, initSimulation, simulateEvent } from '../index'
+import { ButtonType, EventTypeValue, getDisplaySize, initSimulation, KeyCode, simulateEvent } from '../index'
 
 // Initialize simulation (important for Linux/X11)
 try {
