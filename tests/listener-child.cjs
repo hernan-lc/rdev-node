@@ -30,12 +30,6 @@ try {
   done(0, `SKIP: ${error.message}`)
 }
 
-// rdev targets X11; under XWayland, XTEST-injected events are not reliably
-// visible to XRECORD (verified with xdotool), so loopback cannot be tested.
-if (process.env.XDG_SESSION_TYPE === 'wayland') {
-  done(0, 'SKIP: Wayland session (XWayland loopback is unreliable)')
-}
-
 const targetKey = rdev.KeyCode.KeyB
 
 try {
@@ -50,6 +44,9 @@ try {
     },
   )
 } catch (error) {
+  if (/Wayland global capture requires read access/.test(error.message)) {
+    done(0, `SKIP: ${error.message}`)
+  }
   done(1, `ERROR: startListener threw: ${error.message}`)
 }
 

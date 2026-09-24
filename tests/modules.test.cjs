@@ -74,9 +74,22 @@ describe('rdev-node modules', () => {
       return
     }
     assert.strictEqual(rdev.stopListener(), false)
-    rdev.startListener(() => {})
+    try {
+      rdev.startListener(() => {})
+    } catch (error) {
+      if (/Wayland global capture requires read access/.test(error.message)) {
+        t.skip(error.message)
+        return
+      }
+      throw error
+    }
     assert.strictEqual(rdev.stopListener(), true)
-    assert.throws(() => rdev.startListener(() => {}), { message: /native listener is still running/ })
+    if (process.env.XDG_SESSION_TYPE === 'wayland' && process.env.WAYLAND_DISPLAY) {
+      rdev.startListener(() => {})
+      assert.strictEqual(rdev.stopListener(), true)
+    } else {
+      assert.throws(() => rdev.startListener(() => {}), { message: /native listener is still running/ })
+    }
     assert.strictEqual(rdev.stopListener(), false)
   })
 })

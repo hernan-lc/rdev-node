@@ -1,0 +1,132 @@
+// Linux input-event-codes mapping for the public rdev key set.
+// Capture preserves unmapped hardware codes as Unknown; simulation rejects them.
+use evdev::KeyCode as EvKey;
+use rdev::Key;
+
+macro_rules! key_map {
+  ($($code:ident => $key:ident),* $(,)?) => {
+    pub(super) fn from_evdev(code: EvKey) -> Key {
+      match code {
+        $(EvKey::$code => Key::$key,)*
+        _ => Key::Unknown(u32::from(code.code())),
+      }
+    }
+
+    pub(super) fn to_evdev(key: Key) -> Option<EvKey> {
+      match key {
+        $(Key::$key => Some(EvKey::$code),)*
+        _ => None,
+      }
+    }
+
+    pub(super) const SUPPORTED_KEYS: &[EvKey] = &[ $(EvKey::$code,)* ];
+  };
+}
+
+key_map! {
+  KEY_ESC => Escape,
+  KEY_1 => Num1,
+  KEY_2 => Num2,
+  KEY_3 => Num3,
+  KEY_4 => Num4,
+  KEY_5 => Num5,
+  KEY_6 => Num6,
+  KEY_7 => Num7,
+  KEY_8 => Num8,
+  KEY_9 => Num9,
+  KEY_0 => Num0,
+  KEY_MINUS => Minus,
+  KEY_EQUAL => Equal,
+  KEY_BACKSPACE => Backspace,
+  KEY_TAB => Tab,
+  KEY_Q => KeyQ,
+  KEY_W => KeyW,
+  KEY_E => KeyE,
+  KEY_R => KeyR,
+  KEY_T => KeyT,
+  KEY_Y => KeyY,
+  KEY_U => KeyU,
+  KEY_I => KeyI,
+  KEY_O => KeyO,
+  KEY_P => KeyP,
+  KEY_LEFTBRACE => LeftBracket,
+  KEY_RIGHTBRACE => RightBracket,
+  KEY_ENTER => Return,
+  KEY_LEFTCTRL => ControlLeft,
+  KEY_A => KeyA,
+  KEY_S => KeyS,
+  KEY_D => KeyD,
+  KEY_F => KeyF,
+  KEY_G => KeyG,
+  KEY_H => KeyH,
+  KEY_J => KeyJ,
+  KEY_K => KeyK,
+  KEY_L => KeyL,
+  KEY_SEMICOLON => SemiColon,
+  KEY_APOSTROPHE => Quote,
+  KEY_GRAVE => BackQuote,
+  KEY_LEFTSHIFT => ShiftLeft,
+  KEY_BACKSLASH => BackSlash,
+  KEY_Z => KeyZ,
+  KEY_X => KeyX,
+  KEY_C => KeyC,
+  KEY_V => KeyV,
+  KEY_B => KeyB,
+  KEY_N => KeyN,
+  KEY_M => KeyM,
+  KEY_COMMA => Comma,
+  KEY_DOT => Dot,
+  KEY_SLASH => Slash,
+  KEY_RIGHTSHIFT => ShiftRight,
+  KEY_KPASTERISK => KpMultiply,
+  KEY_LEFTALT => Alt,
+  KEY_SPACE => Space,
+  KEY_CAPSLOCK => CapsLock,
+  KEY_F1 => F1,
+  KEY_F2 => F2,
+  KEY_F3 => F3,
+  KEY_F4 => F4,
+  KEY_F5 => F5,
+  KEY_F6 => F6,
+  KEY_F7 => F7,
+  KEY_F8 => F8,
+  KEY_F9 => F9,
+  KEY_F10 => F10,
+  KEY_NUMLOCK => NumLock,
+  KEY_SCROLLLOCK => ScrollLock,
+  KEY_KP7 => Kp7,
+  KEY_KP8 => Kp8,
+  KEY_KP9 => Kp9,
+  KEY_KPMINUS => KpMinus,
+  KEY_KP4 => Kp4,
+  KEY_KP5 => Kp5,
+  KEY_KP6 => Kp6,
+  KEY_KPPLUS => KpPlus,
+  KEY_KP1 => Kp1,
+  KEY_KP2 => Kp2,
+  KEY_KP3 => Kp3,
+  KEY_KP0 => Kp0,
+  KEY_F11 => F11,
+  KEY_F12 => F12,
+  KEY_KPENTER => KpReturn,
+  KEY_RIGHTCTRL => ControlRight,
+  KEY_KPSLASH => KpDivide,
+  KEY_RIGHTALT => AltGr,
+  KEY_HOME => Home,
+  KEY_UP => UpArrow,
+  KEY_PAGEUP => PageUp,
+  KEY_LEFT => LeftArrow,
+  KEY_RIGHT => RightArrow,
+  KEY_END => End,
+  KEY_DOWN => DownArrow,
+  KEY_PAGEDOWN => PageDown,
+  KEY_INSERT => Insert,
+  KEY_DELETE => Delete,
+  KEY_PAUSE => Pause,
+  KEY_LEFTMETA => MetaLeft,
+  KEY_RIGHTMETA => MetaRight,
+  KEY_PRINT => PrintScreen,
+  KEY_KPDOT => KpDelete,
+  KEY_102ND => IntlBackslash,
+  KEY_FN => Function,
+}

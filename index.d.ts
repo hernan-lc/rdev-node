@@ -49,10 +49,8 @@ export declare function getDisplaySize(): DisplaySize
 /**
  * Checks that input simulation is available in the current environment.
  *
- * `rdev` opens and closes its own display connection on every call, so no
- * state is retained here; this is an explicit availability check. It succeeds
- * when a display can be reached and fails otherwise (for example with a
- * `NoDisplay` error on headless Linux without an X server).
+ * On X11, `rdev` checks display access. On Wayland, this creates one reusable
+ * virtual input device through `/dev/uinput`, which requires write access.
  */
 export declare function initSimulation(): void
 
@@ -227,14 +225,15 @@ export declare function simulateEvent(event: InputEvent): void
  * The callback's return value is ignored. Only one listener may run at a
  * time; calling this while a listener is active returns an error.
  *
- * Failures of the underlying `rdev::listen` loop (for example no X display on
- * Linux) are reported through `on_error` when provided, and the listener is
- * released. Without `on_error` they are written to stderr.
+ * X11 uses `rdev::listen`. Linux Wayland reads physical input devices through
+ * evdev and requires persistent read access to `/dev/input/event*`. Native
+ * failures are reported through `on_error` when provided; otherwise they are
+ * written to stderr.
  *
  * The listener holds the Node.js event loop alive until `stopListener()` is
- * called or the listen loop fails. Note: `rdev` 0.5.3 offers no way to unhook
- * the OS listener. After stopping, the native thread remains blocked until
- * process exit, and another listener cannot start while that hook is alive.
+ * called or the listen loop fails. The X11 `rdev` hook cannot be unhooked and
+ * cannot restart after stop. The Wayland evdev loop exits after stop and may
+ * be started again.
  */
 export declare function startListener(callback: (arg: InputEvent) => void, onError?: ((arg: string) => void) | undefined | null): void
 
@@ -242,8 +241,8 @@ export declare function startListener(callback: (arg: InputEvent) => void, onErr
  * Stop the active input event listener, if any.
  *
  * Returns `true` when a listener was running and is now stopped. After
- * stopping, the event loop is no longer held alive. The native hook cannot
- * be restarted while it remains blocked inside `rdev::listen`.
+ * stopping, the event loop is no longer held alive. Wayland can restart;
+ * the X11 `rdev` hook cannot be restarted while it remains blocked.
  */
 export declare function stopListener(): boolean
 

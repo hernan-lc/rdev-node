@@ -35,8 +35,27 @@ ESM is also supported: `import { startListener, stopListener } from 'rdev-node'`
 
 ## Platform Notes
 
-- **Linux**: X11 only; Wayland is not supported by `rdev`. A running X server is required — use `Xvfb` (`xvfb-run`) in headless environments such as CI. Under XWayland, capture/simulation may be limited or unreliable (XTEST-injected events are not reliably visible to XRECORD), so the loopback integration test is skipped there.
+- **Linux X11**: Uses `rdev` and requires a running X server. Use `Xvfb` (`xvfb-run`) in headless environments.
+- **Linux Wayland**: Captures physical keyboard and pointer events through `/dev/input/event*` and injects keys, buttons, and wheel events through `/dev/uinput`. This works below the compositor and requires one-time device permissions; see below. Absolute pointer coordinates and display size currently use XWayland, so a Wayland session without XWayland cannot provide those parts of the API yet. `MouseMove` simulation first uses relative virtual-device motion, then falls back to an XWayland pointer warp if necessary; whether that warp affects native Wayland surfaces depends on the compositor. The optional captured window name is unavailable on this backend.
 - **macOS**: the app/terminal running Node needs **Accessibility** permission (System Settings → Privacy & Security → Accessibility) to receive key events, and **Input Monitoring** approval where prompted.
+
+### One-time Wayland device access
+
+On Linux, check `id -nG`, `ls -l /dev/input/event*`, and `ls -l /dev/uinput`. If the event devices are owned by the `input` group, add your user once and log out and back in:
+
+```bash
+sudo usermod -aG input "$USER"
+```
+
+If `/dev/uinput` is not writable by your user after logging back in, install an explicit udev rule:
+
+```bash
+printf 'KERNEL=="uinput", GROUP="input", MODE="0660"\n' | sudo tee /etc/udev/rules.d/70-rdev-node-uinput.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --name-match=/dev/uinput
+```
+
+Verify access with `test -r /dev/input/event0` and `test -w /dev/uinput`, using a real event device path on your system. Group membership and udev rules persist across runs, so there is no repeated portal approval prompt or restore token. Membership in `input` grants access to all physical keystrokes and pointer input for that account; grant it only to trusted users. The package never changes system permissions automatically.
 
 ## Build
 
@@ -49,7 +68,7 @@ npm run build
 
 ### startListener(callback, onError?)
 
-Listen to keyboard and mouse events. The callback's return value is ignored. Only one native listener can run in a process. A duplicate start throws.
+Listen to keyboard and mouse events. The callback's return value is ignored. Only one active listener can run in a process. A duplicate start throws. On Wayland, missing device access produces a clear error at start.
 
 ```javascript
 startListener(
@@ -66,11 +85,11 @@ startListener(
 
 ### stopListener()
 
-Stop the active listener, if any. Returns `true` when a listener was running and is now stopped. Stopping releases the JavaScript callbacks and lets Node exit. `rdev` offers no way to unhook its blocking OS listener, so a new `startListener()` call throws while that native hook remains alive. If the native listener exits with an error, its callbacks are released and a later start may retry. The active listener keeps the Node event loop alive; stopping or a native error releases that hold.
+Stop the active listener, if any. Returns `true` when a listener was running and is now stopped. Stopping releases the JavaScript callbacks and lets Node exit. On Wayland, the device reader exits and `startListener()` can run again. On X11, `rdev` offers no way to unhook its blocking OS listener, so a new start throws while that hook remains alive. If the native listener exits with an error, its callbacks are released and a later start may retry. The active listener keeps the Node event loop alive; stopping or a native error releases that hold.
 
 ### initSimulation()
 
-Check that input simulation is available in the current environment (for example, that an X display can be reached on Linux). `rdev` manages its own display connections, so no state is retained — this is an explicit availability check. Throws when unavailable.
+Check that input simulation is available. X11 checks display access. Wayland creates a reusable `/dev/uinput` virtual device and throws if device access is unavailable.
 
 ### simulateEvent(event)
 

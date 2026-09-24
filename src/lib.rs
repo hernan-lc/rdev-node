@@ -3,6 +3,8 @@
 pub mod conversions;
 pub mod enums;
 pub mod events;
+#[cfg(target_os = "linux")]
+mod linux_wayland;
 
 use napi::bindgen_prelude::Function;
 use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
@@ -10,7 +12,7 @@ use napi::{Result, Status};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
 use rdev::listen;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 // Re-export the main types for easier access
 pub use enums::{ButtonType, EventTypeValue, KeyCode, NormalizedModifier};
@@ -39,12 +41,15 @@ pub fn string_key_to_keycode(key: String) -> Option<KeyCode> {
 
 /// Checks that input simulation is available in the current environment.
 ///
-/// `rdev` opens and closes its own display connection on every call, so no
-/// state is retained here; this is an explicit availability check. It succeeds
-/// when a display can be reached and fails otherwise (for example with a
-/// `NoDisplay` error on headless Linux without an X server).
+/// On X11, `rdev` checks display access. On Wayland, this creates one reusable
+/// virtual input device through `/dev/uinput`, which requires write access.
 #[napi]
 pub fn init_simulation() -> Result<()> {
+  #[cfg(target_os = "linux")]
+  if linux_wayland::is_wayland() {
+    return linux_wayland::init_simulation()
+      .map_err(|e| napi::Error::from_reason(format!("Input simulation is not available: {e}")));
+  }
   rdev::display_size()
     .map(|_| ())
     .map_err(|e| napi::Error::from_reason(format!("Input simulation is not available: {e:?}")))
@@ -53,6 +58,15 @@ pub fn init_simulation() -> Result<()> {
 /// Get the size of the main display
 #[napi]
 pub fn get_display_size() -> Result<DisplaySize> {
+  #[cfg(target_os = "linux")]
+  if linux_wayland::is_wayland() {
+    let (width, height) = linux_wayland::display_size()
+      .map_err(|e| napi::Error::from_reason(format!("Failed to get display size: {e}")))?;
+    return Ok(DisplaySize {
+      width: width as f64,
+      height: height as f64,
+    });
+  }
   let (width, height) = rdev::display_size()
     .map_err(|e| napi::Error::from_reason(format!("Failed to get display size: {e:?}")))?;
   Ok(DisplaySize {
@@ -82,6 +96,7 @@ struct ListenerSlot {
 }
 
 static LISTENER: Lazy<Mutex<ListenerSlot>> = Lazy::new(|| Mutex::new(ListenerSlot::default()));
+static LISTENER_DONE: Condvar = Condvar::new();
 
 fn spawn_native_thread(
   slot: &mut ListenerSlot,
@@ -113,26 +128,46 @@ fn release_errors(errors: ErrorTsfn) {
 /// The callback's return value is ignored. Only one listener may run at a
 /// time; calling this while a listener is active returns an error.
 ///
-/// Failures of the underlying `rdev::listen` loop (for example no X display on
-/// Linux) are reported through `on_error` when provided, and the listener is
-/// released. Without `on_error` they are written to stderr.
+/// X11 uses `rdev::listen`. Linux Wayland reads physical input devices through
+/// evdev and requires persistent read access to `/dev/input/event*`. Native
+/// failures are reported through `on_error` when provided; otherwise they are
+/// written to stderr.
 ///
 /// The listener holds the Node.js event loop alive until `stopListener()` is
-/// called or the listen loop fails. Note: `rdev` 0.5.3 offers no way to unhook
-/// the OS listener. After stopping, the native thread remains blocked until
-/// process exit, and another listener cannot start while that hook is alive.
+/// called or the listen loop fails. The X11 `rdev` hook cannot be unhooked and
+/// cannot restart after stop. The Wayland evdev loop exits after stop and may
+/// be started again.
 #[napi]
 pub fn start_listener(
   callback: Function<InputEvent, ()>,
   on_error: Option<Function<String, ()>>,
 ) -> Result<()> {
+  #[cfg(target_os = "linux")]
+  let wayland = linux_wayland::is_wayland();
+  #[cfg(not(target_os = "linux"))]
+  let wayland = false;
+
+  #[cfg(target_os = "linux")]
+  if wayland {
+    linux_wayland::preflight_capture()
+      .map_err(|e| napi::Error::from_reason(format!("Input listener is not available: {e}")))?;
+  }
+
   let mut slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
   if slot.active.is_some() {
     return Err(napi::Error::from_reason("Listener is already running."));
   }
+  if wayland && slot.native_running {
+    let (updated, _) = LISTENER_DONE
+      .wait_timeout_while(slot, std::time::Duration::from_secs(2), |state| {
+        state.native_running
+      })
+      .unwrap_or_else(|e| e.into_inner());
+    slot = updated;
+  }
   if slot.native_running {
     return Err(napi::Error::from_reason(
-      "The native listener is still running; rdev cannot restart it after stopListener().",
+      "The native listener is still running and cannot be restarted yet.",
     ));
   }
 
@@ -149,7 +184,7 @@ pub fn start_listener(
     std::thread::Builder::new()
       .name("rdev-node-listener".into())
       .spawn(move || {
-        if let Err(error) = listen(move |event| {
+        let deliver = move |event: rdev::Event| {
           let event: InputEvent = event.into();
           let slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
           let current = slot.active.as_ref().filter(|s| s.generation == generation);
@@ -158,31 +193,46 @@ pub fn start_listener(
               .events
               .call(event, ThreadsafeFunctionCallMode::NonBlocking);
           }
-        }) {
-          let message = format!("Input listener failed: {error:?}");
-          let mut slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
-          if slot.native_running {
-            let ours = slot
+        };
+        #[cfg(target_os = "linux")]
+        let outcome = if wayland {
+          linux_wayland::listen(deliver, || {
+            !LISTENER
+              .lock()
+              .unwrap_or_else(|e| e.into_inner())
               .active
               .as_ref()
-              .is_some_and(|s| s.generation == generation);
-            if ours {
-              if let Some(state) = slot.active.as_ref() {
-                if let Some(errors) = state.errors.as_ref() {
-                  errors.call(message, ThreadsafeFunctionCallMode::NonBlocking);
-                } else {
-                  eprintln!("{message}");
-                }
+              .is_some_and(|s| s.generation == generation)
+          })
+        } else {
+          listen(deliver).map_err(|e| format!("{e:?}"))
+        };
+        #[cfg(not(target_os = "linux"))]
+        let outcome = listen(deliver).map_err(|e| format!("{e:?}"));
+        let mut slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
+        let ours = slot
+          .active
+          .as_ref()
+          .is_some_and(|s| s.generation == generation);
+        if let Err(error) = outcome {
+          let message = format!("Input listener failed: {error}");
+          if ours {
+            if let Some(state) = slot.active.as_ref() {
+              if let Some(errors) = state.errors.as_ref() {
+                errors.call(message, ThreadsafeFunctionCallMode::NonBlocking);
+              } else {
+                eprintln!("{message}");
               }
-              if let Some(state) = slot.active.take() {
-                release_events(state.events);
-              }
-            } else {
-              eprintln!("{message}");
             }
-            slot.native_running = false;
+            if let Some(state) = slot.active.take() {
+              release_events(state.events);
+            }
+          } else {
+            eprintln!("{message}");
           }
         }
+        slot.native_running = false;
+        LISTENER_DONE.notify_all();
       })
       .map(|_| ())
   })?;
@@ -199,8 +249,8 @@ pub fn start_listener(
 /// Stop the active input event listener, if any.
 ///
 /// Returns `true` when a listener was running and is now stopped. After
-/// stopping, the event loop is no longer held alive. The native hook cannot
-/// be restarted while it remains blocked inside `rdev::listen`.
+/// stopping, the event loop is no longer held alive. Wayland can restart;
+/// the X11 `rdev` hook cannot be restarted while it remains blocked.
 #[napi]
 pub fn stop_listener() -> bool {
   let state = LISTENER
@@ -225,6 +275,11 @@ pub fn simulate_event(event: InputEvent) -> Result<()> {
   let rdev_event: rdev::Event = event
     .try_into()
     .map_err(|e| napi::Error::from_reason(format!("Invalid event data: {e}")))?;
+  #[cfg(target_os = "linux")]
+  if linux_wayland::is_wayland() {
+    return linux_wayland::simulate(rdev_event.event_type)
+      .map_err(|e| napi::Error::from_reason(format!("Failed to simulate event: {e}")));
+  }
   rdev::simulate(&rdev_event.event_type)
     .map_err(|e| napi::Error::from_reason(format!("Failed to simulate event: {e:?}")))?;
   Ok(())

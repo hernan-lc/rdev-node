@@ -340,10 +340,19 @@ describe('rdev-node Complete Test Suite', () => {
         return
       }
       const errors = []
-      const result = rdev.startListener(
-        () => {},
-        (message) => errors.push(message),
-      )
+      let result
+      try {
+        result = rdev.startListener(
+          () => {},
+          (message) => errors.push(message),
+        )
+      } catch (error) {
+        if (/Wayland global capture requires read access/.test(error.message)) {
+          t.skip(error.message)
+          return
+        }
+        throw error
+      }
       assert.strictEqual(result, undefined)
       assert.throws(() => rdev.startListener(() => {}), { message: /already running/ })
       assert.strictEqual(rdev.stopListener(), true)
