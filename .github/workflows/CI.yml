@@ -267,6 +267,10 @@ jobs:
         run: |
           source $HOME/.cargo/env
           rustup target add x86_64-unknown-linux-musl
+        # NOTE: container steps default to `sh`; `source` needs bash.
+        # (Per-step on purpose: fresh Alpine has no bash until the apk
+        # step above installs it, so a job-wide default would break it.)
+        shell: bash
 
       - name: Install dependencies
         # npm: bun needs glibc and cannot run on Alpine/musl, so the frozen
@@ -274,6 +278,7 @@ jobs:
         run: |
           source $HOME/.cargo/env
           npm install --no-package-lock
+        shell: bash
 
       - name: Build
         run: |
@@ -283,6 +288,7 @@ jobs:
           # List built artifacts for debugging
           echo "=== Built artifacts ==="
           ls -la *.node || echo "No .node files found"
+        shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
