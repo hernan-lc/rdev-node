@@ -157,6 +157,27 @@ describe('rdev-node Complete Test Suite', () => {
       }
     })
 
+    test('Wayland display size does not require XWayland', (t) => {
+      if (process.platform !== 'linux' || process.env.XDG_SESSION_TYPE !== 'wayland' || !process.env.WAYLAND_DISPLAY) {
+        t.skip('Requires a Wayland session')
+        return
+      }
+      const expected = rdev.getDisplaySize()
+      const env = { ...process.env }
+      delete env.DISPLAY
+      const child = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          'process.stdout.write(JSON.stringify(require(process.argv[1]).getDisplaySize()))',
+          path.join(__dirname, '..', 'index.js'),
+        ],
+        { env, encoding: 'utf8', timeout: 10000 },
+      )
+      assert.strictEqual(child.status, 0, child.stderr || child.error?.message)
+      assert.deepStrictEqual(JSON.parse(child.stdout), expected)
+    })
+
     test('initSimulation lifecycle', () => {
       try {
         rdev.initSimulation()
