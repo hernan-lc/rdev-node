@@ -5,11 +5,11 @@
     "": {
       "name": "rdev-node",
       "devDependencies": {
-        "@biomejs/biome": "^2.5.14",
-        "@napi-rs/cli": "^3.10.5",
-        "@types/bun": "^1.4.2",
-        "@types/node": "^26.6.2",
-        "typescript": "^7.0.2",
+        "@biomejs/biome": "2.5.14",
+        "@napi-rs/cli": "3.10.5",
+        "@types/bun": "1.4.2",
+        "@types/node": "26.6.2",
+        "typescript": "7.0.2",
       },
     },
   },

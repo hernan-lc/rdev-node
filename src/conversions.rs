@@ -143,13 +143,15 @@ pub fn button_to_type(btn: &Button) -> ButtonType {
   }
 }
 
-pub fn type_to_button(btn: ButtonType) -> Button {
-  match btn {
+pub fn type_to_button(btn: ButtonType) -> Result<Button, String> {
+  Ok(match btn {
     ButtonType::Left => Button::Left,
     ButtonType::Right => Button::Right,
     ButtonType::Middle => Button::Middle,
-    ButtonType::Unknown => Button::Unknown(0),
-  }
+    ButtonType::Unknown => {
+      return Err("Cannot simulate an unknown mouse button without its native platform code".into())
+    }
+  })
 }
 
 pub fn key_to_type(key: &Key) -> KeyCode {
@@ -263,8 +265,8 @@ pub fn key_to_type(key: &Key) -> KeyCode {
   }
 }
 
-pub fn type_to_key(key: KeyCode) -> Key {
-  match key {
+pub fn type_to_key(key: KeyCode) -> Result<Key, String> {
+  Ok(match key {
     KeyCode::Alt => Key::Alt,
     KeyCode::AltGr => Key::AltGr,
     KeyCode::Backspace => Key::Backspace,
@@ -370,8 +372,10 @@ pub fn type_to_key(key: KeyCode) -> Key {
     KeyCode::Kp9 => Key::Kp9,
     KeyCode::KpDelete => Key::KpDelete,
     KeyCode::Function => Key::Function,
-    KeyCode::Unknown => Key::Unknown(0),
-  }
+    KeyCode::Unknown => {
+      return Err("Cannot simulate an unknown key without its native platform code".into())
+    }
+  })
 }
 
 impl From<Event> for InputEvent {
@@ -467,20 +471,70 @@ impl TryFrom<InputEvent> for Event {
   type Error = String;
 
   fn try_from(event: InputEvent) -> Result<Self, Self::Error> {
+    let timestamp = event.time;
+    if !timestamp.is_finite()
+      || timestamp < 0.0
+      || timestamp.fract() != 0.0
+      || timestamp >= 2_f64.powi(53)
+    {
+      return Err(
+        "Invalid event timestamp: expected a finite, non-negative integer below 2^53 milliseconds"
+          .into(),
+      );
+    }
+    let time = std::time::SystemTime::UNIX_EPOCH
+      .checked_add(std::time::Duration::from_millis(timestamp as u64))
+      .ok_or("Invalid event timestamp: outside the supported SystemTime range")?;
+    for (present, expected, field) in [
+      (
+        event.key_press.is_some(),
+        matches!(event.event_type, EventTypeValue::KeyPress),
+        "key_press",
+      ),
+      (
+        event.key_release.is_some(),
+        matches!(event.event_type, EventTypeValue::KeyRelease),
+        "key_release",
+      ),
+      (
+        event.mouse_move.is_some(),
+        matches!(event.event_type, EventTypeValue::MouseMove),
+        "mouse_move",
+      ),
+      (
+        event.button_press.is_some(),
+        matches!(event.event_type, EventTypeValue::ButtonPress),
+        "button_press",
+      ),
+      (
+        event.button_release.is_some(),
+        matches!(event.event_type, EventTypeValue::ButtonRelease),
+        "button_release",
+      ),
+      (
+        event.wheel.is_some(),
+        matches!(event.event_type, EventTypeValue::Wheel),
+        "wheel",
+      ),
+    ] {
+      if present && !expected {
+        return Err(format!("Unexpected {field} data for this event type"));
+      }
+    }
     let event_type = match event.event_type {
       EventTypeValue::KeyPress => {
         let key = event
           .key_press
           .ok_or("Missing key_press data for KeyPress event")?
           .key;
-        EventType::KeyPress(type_to_key(key))
+        EventType::KeyPress(type_to_key(key)?)
       }
       EventTypeValue::KeyRelease => {
         let key = event
           .key_release
           .ok_or("Missing key_release data for KeyRelease event")?
           .key;
-        EventType::KeyRelease(type_to_key(key))
+        EventType::KeyRelease(type_to_key(key)?)
       }
       EventTypeValue::MouseMove => {
         let mv = event
@@ -493,14 +547,14 @@ impl TryFrom<InputEvent> for Event {
           .button_press
           .ok_or("Missing button_press data for ButtonPress event")?
           .button;
-        EventType::ButtonPress(type_to_button(btn))
+        EventType::ButtonPress(type_to_button(btn)?)
       }
       EventTypeValue::ButtonRelease => {
         let btn = event
           .button_release
           .ok_or("Missing button_release data for ButtonRelease event")?
           .button;
-        EventType::ButtonRelease(type_to_button(btn))
+        EventType::ButtonRelease(type_to_button(btn)?)
       }
       EventTypeValue::Wheel => {
         let w = event.wheel.ok_or("Missing wheel data for Wheel event")?;
@@ -514,9 +568,7 @@ impl TryFrom<InputEvent> for Event {
     Ok(Event {
       event_type,
       name: event.name,
-      time: std::time::SystemTime::UNIX_EPOCH
-        .checked_add(std::time::Duration::from_millis(event.time as u64))
-        .unwrap_or(std::time::SystemTime::now()),
+      time,
     })
   }
 }
@@ -563,5 +615,92 @@ mod tests {
   fn unknown_keys_map_to_none() {
     assert_eq!(string_key_to_keycode("not-a-key"), None);
     assert_eq!(string_key_to_keycode(""), None);
+  }
+
+  #[test]
+  fn key_name_families() {
+    for (name, expected) in [
+      ("CTRL", KeyCode::ControlLeft),
+      ("control", KeyCode::ControlLeft),
+      ("controll", KeyCode::ControlLeft),
+      ("controlleft", KeyCode::ControlLeft),
+      ("controlright", KeyCode::ControlRight),
+      ("0", KeyCode::Num0),
+      ("Num9", KeyCode::Num9),
+      ("a", KeyCode::KeyA),
+      ("KEYZ", KeyCode::KeyZ),
+      ("F12", KeyCode::F12),
+      ("numpad8", KeyCode::Kp8),
+      ("KPPlus", KeyCode::KpPlus),
+      ("semicolon", KeyCode::SemiColon),
+      ("backslash", KeyCode::BackSlash),
+    ] {
+      assert_eq!(string_key_to_keycode(name), Some(expected), "{name}");
+    }
+  }
+
+  fn event(event_type: EventTypeValue) -> InputEvent {
+    InputEvent {
+      event_type,
+      key_press: None,
+      key_release: None,
+      mouse_move: None,
+      button_press: None,
+      button_release: None,
+      wheel: None,
+      name: None,
+      time: 1_700_000_000_000.0,
+    }
+  }
+
+  #[test]
+  fn all_event_types_require_matching_payload() {
+    for (kind, field) in [
+      (EventTypeValue::KeyPress, "key_press"),
+      (EventTypeValue::KeyRelease, "key_release"),
+      (EventTypeValue::MouseMove, "mouse_move"),
+      (EventTypeValue::ButtonPress, "button_press"),
+      (EventTypeValue::ButtonRelease, "button_release"),
+      (EventTypeValue::Wheel, "wheel"),
+    ] {
+      assert!(Event::try_from(event(kind)).unwrap_err().contains(field));
+    }
+  }
+
+  #[test]
+  fn unknown_native_values_are_captured_but_cannot_be_simulated() {
+    assert!(matches!(
+      button_to_type(&Button::Unknown(42)),
+      ButtonType::Unknown
+    ));
+    assert_eq!(key_to_type(&Key::Unknown(42)), KeyCode::Unknown);
+    assert!(type_to_button(ButtonType::Unknown)
+      .unwrap_err()
+      .contains("native platform code"));
+    assert!(type_to_key(KeyCode::Unknown)
+      .unwrap_err()
+      .contains("native platform code"));
+  }
+
+  #[test]
+  fn invalid_timestamps_are_rejected() {
+    for time in [-1.0, f64::NAN, f64::INFINITY, 2_f64.powi(53), 1.5] {
+      let mut input = event(EventTypeValue::KeyPress);
+      input.time = time;
+      assert!(Event::try_from(input).unwrap_err().contains("timestamp"));
+    }
+  }
+
+  #[test]
+  fn unrelated_payload_is_rejected() {
+    let mut input = event(EventTypeValue::KeyPress);
+    input.key_press = Some(KeyPressEvent { key: KeyCode::KeyA });
+    input.wheel = Some(WheelEvent {
+      delta_x: 1,
+      delta_y: 2,
+    });
+    assert!(Event::try_from(input)
+      .unwrap_err()
+      .contains("Unexpected wheel"));
   }
 }

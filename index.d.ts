@@ -233,9 +233,8 @@ export declare function simulateEvent(event: InputEvent): void
  *
  * The listener holds the Node.js event loop alive until `stopListener()` is
  * called or the listen loop fails. Note: `rdev` 0.5.3 offers no way to unhook
- * the OS listener, so after stopping, the blocked native thread lingers until
- * process exit; it no longer delivers events and no longer keeps the process
- * alive.
+ * the OS listener. After stopping, the native thread remains blocked until
+ * process exit, and another listener cannot start while that hook is alive.
  */
 export declare function startListener(callback: (arg: InputEvent) => void, onError?: ((arg: string) => void) | undefined | null): void
 
@@ -243,8 +242,8 @@ export declare function startListener(callback: (arg: InputEvent) => void, onErr
  * Stop the active input event listener, if any.
  *
  * Returns `true` when a listener was running and is now stopped. After
- * stopping, the event loop is no longer held alive and `startListener()` may
- * be called again. See `startListener()` for the lingering-thread limitation.
+ * stopping, the event loop is no longer held alive. The native hook cannot
+ * be restarted while it remains blocked inside `rdev::listen`.
  */
 export declare function stopListener(): boolean
 

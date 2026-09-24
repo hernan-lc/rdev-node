@@ -65,7 +65,7 @@ describe('rdev-node modules', () => {
     }
   })
 
-  test('stopListener releases and restart after stop works', (t) => {
+  test('stopping releases JS listener and prevents a second native hook', (t) => {
     const rdev = require('../index.js')
     try {
       rdev.initSimulation()
@@ -76,10 +76,7 @@ describe('rdev-node modules', () => {
     assert.strictEqual(rdev.stopListener(), false)
     rdev.startListener(() => {})
     assert.strictEqual(rdev.stopListener(), true)
-    // Stopping releases the listener (and its TSFN): starting again must
-    // succeed instead of hitting the duplicate-start guard.
-    rdev.startListener(() => {})
-    assert.strictEqual(rdev.stopListener(), true)
+    assert.throws(() => rdev.startListener(() => {}), { message: /native listener is still running/ })
     assert.strictEqual(rdev.stopListener(), false)
   })
 })

@@ -58,16 +58,16 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/complete.test.cjs",
-    "test:all": "node --test tests/*.test.cjs tests/*.test.mjs",
-    "version": "napi version"
+    "test": "node --test tests/*.test.cjs tests/*.test.mjs",
+    "version": "napi version",
+    "test:core": "node --test tests/complete.test.cjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@napi-rs/cli": "^3.10.5",
-    "@types/bun": "^1.4.2",
-    "@types/node": "^26.6.2",
-    "typescript": "^7.0.2"
+    "@biomejs/biome": "2.5.14",
+    "@napi-rs/cli": "3.10.5",
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.2",
+    "typescript": "7.0.2"
   },
   "lint-staged": {
     "*.@(js|ts|tsx)": [

@@ -208,6 +208,14 @@ describe('rdev-node Complete Test Suite', () => {
         },
       },
       {
+        name: 'Button Release',
+        data: {
+          eventType: rdev.EventTypeValue.ButtonRelease,
+          buttonRelease: { button: rdev.ButtonType.Right },
+          time: now + 17,
+        },
+      },
+      {
         name: 'Wheel',
         data: { eventType: rdev.EventTypeValue.Wheel, wheel: { deltaX: 5, deltaY: -5 }, time: now + 20 },
       },
@@ -222,6 +230,75 @@ describe('rdev-node Complete Test Suite', () => {
         assert.doesNotThrow(() => rdev.simulateEvent(data))
       })
     }
+
+    test('simulation rejects malformed payloads before display access', () => {
+      const cases = [
+        ['KeyPress', 'keyPress', /Missing key_press/],
+        ['KeyRelease', 'keyRelease', /Missing key_release/],
+        ['MouseMove', 'mouseMove', /Missing mouse_move/],
+        ['ButtonPress', 'buttonPress', /Missing button_press/],
+        ['ButtonRelease', 'buttonRelease', /Missing button_release/],
+        ['Wheel', 'wheel', /Missing wheel/],
+      ]
+      for (const [kind, , error] of cases) {
+        assert.throws(() => rdev.simulateEvent({ eventType: rdev.EventTypeValue[kind], time: now }), {
+          message: error,
+        })
+      }
+      assert.throws(
+        () =>
+          rdev.simulateEvent({
+            eventType: rdev.EventTypeValue.KeyPress,
+            keyPress: { key: rdev.KeyCode.KeyA },
+            wheel: { deltaX: 1, deltaY: 1 },
+            time: now,
+          }),
+        { message: /Unexpected wheel/ },
+      )
+    })
+
+    test('simulation rejects unknown keys and buttons', () => {
+      for (const kind of ['KeyPress', 'KeyRelease']) {
+        const field = kind === 'KeyPress' ? 'keyPress' : 'keyRelease'
+        assert.throws(
+          () =>
+            rdev.simulateEvent({
+              eventType: rdev.EventTypeValue[kind],
+              [field]: { key: rdev.KeyCode.Unknown },
+              time: now,
+            }),
+          {
+            message: /unknown key without its native platform code/,
+          },
+        )
+      }
+      for (const kind of ['ButtonPress', 'ButtonRelease']) {
+        const field = kind === 'ButtonPress' ? 'buttonPress' : 'buttonRelease'
+        assert.throws(
+          () =>
+            rdev.simulateEvent({
+              eventType: rdev.EventTypeValue[kind],
+              [field]: { button: rdev.ButtonType.Unknown },
+              time: now,
+            }),
+          {
+            message: /unknown mouse button without its native platform code/,
+          },
+        )
+      }
+    })
+
+    test('simulation validates timestamps', () => {
+      for (const time of [-1, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+        assert.throws(
+          () =>
+            rdev.simulateEvent({ eventType: rdev.EventTypeValue.KeyPress, keyPress: { key: rdev.KeyCode.KeyA }, time }),
+          {
+            message: /timestamp/,
+          },
+        )
+      }
+    })
 
     test('simulateEvent validation - missing keyPress', (t) => {
       if (!simulationInitialized) {

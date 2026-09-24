@@ -1,17 +1,17 @@
-# Auto detect text files and perform LF normalization
-*        text=auto
+* text=auto
 
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.rs   text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
 
-*.ts    text eol=lf merge=union 
-*.tsx   text eol=lf merge=union 
-*.rs    text eol=lf merge=union 
-*.js    text eol=lf merge=union 
-*.json  text eol=lf merge=union 
-*.debug text eol=lf merge=union 
-
-# Generated codes
+# Generated code
 index.js linguist-generated
+index.mjs linguist-generated
 index.d.ts linguist-generated
 
-# Documentation
+# Real examples should remain detectable
 examples/** linguist-documentation=false

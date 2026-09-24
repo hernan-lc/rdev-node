@@ -77,10 +77,36 @@ struct ListenerState {
 #[derive(Default)]
 struct ListenerSlot {
   next_generation: u64,
+  native_running: bool,
   active: Option<ListenerState>,
 }
 
 static LISTENER: Lazy<Mutex<ListenerSlot>> = Lazy::new(|| Mutex::new(ListenerSlot::default()));
+
+fn spawn_native_thread(
+  slot: &mut ListenerSlot,
+  spawn: impl FnOnce() -> std::io::Result<()>,
+) -> Result<()> {
+  spawn().map_err(|e| napi::Error::from_reason(format!("Failed to spawn listener thread: {e}")))?;
+  slot.native_running = true;
+  Ok(())
+}
+
+// Abort pending event delivery when a listener is detached. napi-rs otherwise
+// drains already queued events after stopListener() has returned.
+#[allow(deprecated)]
+fn release_events(events: EventTsfn) {
+  if let Err(error) = events.abort() {
+    eprintln!("Failed to abort listener callbacks: {error}");
+  }
+}
+
+#[allow(deprecated)]
+fn release_errors(errors: ErrorTsfn) {
+  if let Err(error) = errors.abort() {
+    eprintln!("Failed to abort listener error callbacks: {error}");
+  }
+}
 
 /// Start listening for input events.
 ///
@@ -93,20 +119,20 @@ static LISTENER: Lazy<Mutex<ListenerSlot>> = Lazy::new(|| Mutex::new(ListenerSlo
 ///
 /// The listener holds the Node.js event loop alive until `stopListener()` is
 /// called or the listen loop fails. Note: `rdev` 0.5.3 offers no way to unhook
-/// the OS listener, so after stopping, the blocked native thread lingers until
-/// process exit; it no longer delivers events and no longer keeps the process
-/// alive.
+/// the OS listener. After stopping, the native thread remains blocked until
+/// process exit, and another listener cannot start while that hook is alive.
 #[napi]
 pub fn start_listener(
   callback: Function<InputEvent, ()>,
   on_error: Option<Function<String, ()>>,
 ) -> Result<()> {
-  let mut slot = LISTENER
-    .lock()
-    .map_err(|e| napi::Error::from_reason(format!("Failed to lock listener state: {e:?}")))?;
+  let mut slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
   if slot.active.is_some() {
+    return Err(napi::Error::from_reason("Listener is already running."));
+  }
+  if slot.native_running {
     return Err(napi::Error::from_reason(
-      "Listener is already running. Call stopListener() before starting a new one.",
+      "The native listener is still running; rdev cannot restart it after stopListener().",
     ));
   }
 
@@ -117,30 +143,25 @@ pub fn start_listener(
 
   let generation = slot.next_generation;
   slot.next_generation = slot.next_generation.wrapping_add(1);
-  slot.active = Some(ListenerState {
-    generation,
-    events,
-    errors,
-  });
-  drop(slot);
-
-  std::thread::Builder::new()
-    .name("rdev-node-listener".into())
-    .spawn(move || {
-      if let Err(error) = listen(move |event| {
-        let event: InputEvent = event.into();
-        if let Ok(slot) = LISTENER.lock() {
+  // Keep the lock until spawn succeeds. The new thread waits on this lock,
+  // so it cannot report failure before its state is published.
+  spawn_native_thread(&mut slot, || {
+    std::thread::Builder::new()
+      .name("rdev-node-listener".into())
+      .spawn(move || {
+        if let Err(error) = listen(move |event| {
+          let event: InputEvent = event.into();
+          let slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
           let current = slot.active.as_ref().filter(|s| s.generation == generation);
           if let Some(state) = current {
             state
               .events
               .call(event, ThreadsafeFunctionCallMode::NonBlocking);
           }
-        }
-      }) {
-        let message = format!("Input listener failed: {error:?}");
-        match LISTENER.lock() {
-          Ok(mut slot) => {
+        }) {
+          let message = format!("Input listener failed: {error:?}");
+          let mut slot = LISTENER.lock().unwrap_or_else(|e| e.into_inner());
+          if slot.native_running {
             let ours = slot
               .active
               .as_ref()
@@ -153,16 +174,24 @@ pub fn start_listener(
                   eprintln!("{message}");
                 }
               }
-              // Release the bridges so queued callbacks drain and the event
-              // loop is no longer held alive. This thread exits here.
-              slot.active = None;
+              if let Some(state) = slot.active.take() {
+                release_events(state.events);
+              }
+            } else {
+              eprintln!("{message}");
             }
+            slot.native_running = false;
           }
-          Err(_) => eprintln!("{message}"),
         }
-      }
-    })
-    .map_err(|e| napi::Error::from_reason(format!("Failed to spawn listener thread: {e}")))?;
+      })
+      .map(|_| ())
+  })?;
+
+  slot.active = Some(ListenerState {
+    generation,
+    events,
+    errors,
+  });
 
   Ok(())
 }
@@ -170,14 +199,24 @@ pub fn start_listener(
 /// Stop the active input event listener, if any.
 ///
 /// Returns `true` when a listener was running and is now stopped. After
-/// stopping, the event loop is no longer held alive and `startListener()` may
-/// be called again. See `startListener()` for the lingering-thread limitation.
+/// stopping, the event loop is no longer held alive. The native hook cannot
+/// be restarted while it remains blocked inside `rdev::listen`.
 #[napi]
 pub fn stop_listener() -> bool {
-  LISTENER
+  let state = LISTENER
     .lock()
-    .map(|mut slot| slot.active.take().is_some())
-    .unwrap_or(false)
+    .unwrap_or_else(|e| e.into_inner())
+    .active
+    .take();
+  if let Some(state) = state {
+    release_events(state.events);
+    if let Some(errors) = state.errors {
+      release_errors(errors);
+    }
+    true
+  } else {
+    false
+  }
 }
 
 /// Simulate an input event
@@ -189,4 +228,18 @@ pub fn simulate_event(event: InputEvent) -> Result<()> {
   rdev::simulate(&rdev_event.event_type)
     .map_err(|e| napi::Error::from_reason(format!("Failed to simulate event: {e:?}")))?;
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn failed_spawn_does_not_mark_native_listener_running() {
+    let mut slot = ListenerSlot::default();
+    let failure = spawn_native_thread(&mut slot, || Err(std::io::Error::other("injected failure")));
+    assert!(failure.is_err());
+    assert!(!slot.native_running);
+    assert!(slot.active.is_none());
+  }
 }

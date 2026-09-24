@@ -178,10 +178,10 @@ jobs:
               
               # Install dependencies using npm (bun not available on ARM32, so the
               # frozen bun.lock cannot be used here)
-              npm install
+              npm install --no-package-lock
               
               # Build using napi-rs cli directly
-              npx napi build --platform --release --target armv7-unknown-linux-gnueabihf
+              ./node_modules/.bin/napi build --platform --release --target armv7-unknown-linux-gnueabihf
             '
 
       - name: Upload artifact
@@ -226,12 +226,12 @@ jobs:
         # bun.lock cannot be used here.
         run: |
           source $HOME/.cargo/env
-          npm install
+          npm install --no-package-lock
 
       - name: Build
         run: |
           source $HOME/.cargo/env
-          npx napi build --platform --release --target x86_64-unknown-linux-musl
+          ./node_modules/.bin/napi build --platform --release --target x86_64-unknown-linux-musl
           
           # List built artifacts for debugging
           echo "=== Built artifacts ==="
@@ -357,7 +357,7 @@ jobs:
             
             if [ \"${{ matrix.settings.no_bun }}\" = \"true\" ]; then
               # npm: bun is unavailable on ARM32, so the frozen bun.lock cannot be used here.
-              npm install
+              npm install --no-package-lock
               xvfb-run npm run test
             else
               curl -fsSL https://bun.sh/install | bash

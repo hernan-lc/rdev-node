@@ -21,6 +21,8 @@ startListener((event) => {
 stopListener();
 ```
 
+ESM is also supported: `import { startListener, stopListener } from 'rdev-node'`.
+
 ## Requirements
 
 - Node.js >= 20.3.0 (N-API 9)
@@ -47,7 +49,7 @@ npm run build
 
 ### startListener(callback, onError?)
 
-Listen to keyboard and mouse events. The callback's return value is ignored. Only one listener may run at a time.
+Listen to keyboard and mouse events. The callback's return value is ignored. Only one native listener can run in a process. A duplicate start throws.
 
 ```javascript
 startListener(
@@ -64,7 +66,7 @@ startListener(
 
 ### stopListener()
 
-Stop the active listener, if any. Returns `true` when a listener was running and is now stopped. After stopping, the event loop is no longer held alive and `startListener()` may be called again. Note: `rdev` offers no way to unhook the OS listener, so the blocked native thread lingers until process exit; it no longer delivers events.
+Stop the active listener, if any. Returns `true` when a listener was running and is now stopped. Stopping releases the JavaScript callbacks and lets Node exit. `rdev` offers no way to unhook its blocking OS listener, so a new `startListener()` call throws while that native hook remains alive. If the native listener exits with an error, its callbacks are released and a later start may retry. The active listener keeps the Node event loop alive; stopping or a native error releases that hold.
 
 ### initSimulation()
 
@@ -72,7 +74,7 @@ Check that input simulation is available in the current environment (for example
 
 ### simulateEvent(event)
 
-Simulate keyboard/mouse events.
+Simulate keyboard/mouse events. Each event requires its matching payload and a finite, non-negative integer timestamp below `2^53` milliseconds. Unknown captured keys/buttons cannot be simulated because their native platform codes are unavailable.
 
 ```javascript
 simulateEvent({
