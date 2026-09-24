@@ -167,6 +167,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: node:22-bookworm-slim
+    # NOTE: steps in a `container:` job run under `sh` by default, and this
+    # job's steps use bashisms (`source`), so force bash job-wide.
+    # (bookworm-slim ships bash, so this is safe from the first step.)
+    defaults:
+      run:
+        shell: bash
     env:
       # Honored by both cargo and the napi CLI (see the `build` job note).
       CARGO_BUILD_TARGET: armv7-unknown-linux-gnueabihf
