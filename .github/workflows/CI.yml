@@ -55,16 +55,16 @@ jobs:
             target: x86_64-unknown-linux-gnu
             build: |
               sudo apt-get update
-              sudo apt-get install -y libx11-dev libxtst-dev libxi-dev libxext-dev libxfixes-dev libxrender-dev pkg-config
+              sudo apt-get install -y --no-install-recommends libx11-dev libxtst-dev libxi-dev libxext-dev libxfixes-dev libxrender-dev pkg-config
               bun run build --target x86_64-unknown-linux-gnu
 
     name: stable - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@f4d14e03ff726c06358e5557344e1da148b56cf7 # v1
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
 
@@ -75,7 +75,7 @@ jobs:
           targets: ${{ matrix.settings.target }}
 
       - name: Cache cargo
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry/index/
@@ -93,68 +93,74 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bindings-${{ matrix.settings.target }}
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
-  # Linux ARM64 GNU - Use QEMU with Debian container for native build
+  # Linux ARM64 GNU - native ARM runner (no QEMU needed, much faster and
+  # more reliable than emulating a container on x64).
   build-linux-aarch64-gnu:
     name: stable - aarch64-unknown-linux-gnu
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-        with:
-          platforms: arm64
-
-      - name: Build in ARM64 container
+      - name: Install system dependencies
         run: |
-          docker run --rm --platform linux/arm64 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            node:20-slim bash -c '
-              set -e
-              
-              # Install build dependencies
-              apt-get update
-              apt-get install -y curl unzip build-essential pkg-config \
-                libx11-dev libxtst-dev libxi-dev \
-                libxext-dev libxfixes-dev libxrender-dev
-              
-              # Install Bun
-              curl -fsSL https://bun.sh/install | bash
-              export BUN_INSTALL="$HOME/.bun"
-              export PATH="$BUN_INSTALL/bin:$PATH"
-              
-              # Install Rust
-              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-              source $HOME/.cargo/env
-              
-              # Install dependencies and build
-              $HOME/.bun/bin/bun install --frozen-lockfile
-              $HOME/.bun/bin/bun run build --target aarch64-unknown-linux-gnu
-            '
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libx11-dev libxtst-dev libxi-dev libxext-dev libxfixes-dev libxrender-dev pkg-config
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cargo-cache
+            target/
+          key: aarch64-unknown-linux-gnu-cargo-ubuntu-24.04-arm-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build --target aarch64-unknown-linux-gnu
+        shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
-  # Linux ARMv7 GNU - Use QEMU with Debian container for native build
+  # Linux ARMv7 GNU - QEMU with Debian container for a native build.
+  # There is no GitHub-hosted ARM32 runner, and cross-compiling the X11
+  # system deps via multiarch is fragile, so QEMU is the recommended
+  # approach here. Must use bookworm (or newer): bullseye is EOL and its
+  # security repo 404s.
   build-linux-armv7-gnu:
     name: stable - armv7-unknown-linux-gnueabihf
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
         with:
           platforms: arm
 
@@ -163,29 +169,31 @@ jobs:
           docker run --rm --platform linux/arm/v7 \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
-            node:20-bullseye-slim bash -c '
+            node:22-bookworm-slim bash -c '
               set -e
-              
+              export DEBIAN_FRONTEND=noninteractive
+
               # Install build dependencies
               apt-get update
-              apt-get install -y curl build-essential pkg-config \
+              apt-get install -y --no-install-recommends curl ca-certificates build-essential pkg-config \
                 libx11-dev libxtst-dev libxi-dev \
                 libxext-dev libxfixes-dev libxrender-dev
-              
+              rm -rf /var/lib/apt/lists/*
+
               # Install Rust
               curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
               source $HOME/.cargo/env
-              
+
               # Install dependencies using npm (bun not available on ARM32, so the
               # frozen bun.lock cannot be used here)
               npm install --no-package-lock
-              
+
               # Build using napi-rs cli directly
               ./node_modules/.bin/napi build --platform --release --target armv7-unknown-linux-gnueabihf
             '
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bindings-armv7-unknown-linux-gnueabihf
           path: ${{ env.APP_NAME }}.*.node
@@ -196,9 +204,9 @@ jobs:
     name: stable - x86_64-unknown-linux-musl
     runs-on: ubuntu-latest
     container:
-      image: node:20-alpine
+      image: node:22-alpine
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install build dependencies
         run: |
@@ -232,12 +240,12 @@ jobs:
         run: |
           source $HOME/.cargo/env
           ./node_modules/.bin/napi build --platform --release --target x86_64-unknown-linux-musl
-          
+
           # List built artifacts for debugging
           echo "=== Built artifacts ==="
           ls -la *.node || echo "No .node files found"
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bindings-x86_64-unknown-linux-musl
           path: ${{ env.APP_NAME }}.*.node
@@ -287,27 +295,33 @@ jobs:
             platform: linux/arm/v7
             no_bun: true
         node:
-          - '20'
           - '22'
+          - '24'
+        # The official Node 24 images dropped linux/arm/v7, so ARMv7 can
+        # only be tested on Node 22.
+        exclude:
+          - settings:
+              target: armv7-unknown-linux-gnueabihf
+            node: '24'
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node.js
         if: ${{ !matrix.settings.docker }}
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node }}
           architecture: ${{ matrix.settings.architecture }}
 
       - name: Setup Bun
         if: ${{ !matrix.settings.docker && !matrix.settings.no_bun }}
-        uses: oven-sh/setup-bun@f4d14e03ff726c06358e5557344e1da148b56cf7 # v1
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: bindings-${{ matrix.settings.target }}
           path: .
@@ -322,7 +336,7 @@ jobs:
             bun install --frozen-lockfile
             bun run test
           else
-            sudo apt-get update && sudo apt-get install -y xvfb xauth
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
             bun install --frozen-lockfile
             xvfb-run bun run test
           fi
@@ -330,31 +344,33 @@ jobs:
 
       - name: Set up QEMU
         if: ${{ matrix.settings.docker && matrix.settings.platform }}
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
         with:
-          platforms: ${{ matrix.settings.platform }}
+          platforms: ${{ matrix.settings.platform == 'linux/arm/v7' && 'arm' || 'arm64' }}
 
       - name: Test (Docker)
         if: ${{ matrix.settings.docker }}
         run: |
-          DOCKER_IMAGE="node:${{ matrix.node }}-slim"
+          DOCKER_IMAGE="node:${{ matrix.node }}-bookworm-slim"
           if [ "${{ matrix.settings.musl }}" = "true" ]; then
             DOCKER_IMAGE="node:${{ matrix.node }}-alpine"
           fi
-          
+
           PLATFORM_ARG=""
           if [ -n "${{ matrix.settings.platform }}" ]; then
             PLATFORM_ARG="--platform ${{ matrix.settings.platform }}"
           fi
-          
+
           docker run --rm $PLATFORM_ARG -v $(pwd):/build -w /build $DOCKER_IMAGE sh -c "
             set -e
             if [ -f /etc/alpine-release ]; then
               apk add --no-cache bash curl unzip libxtst libx11 libxi libxext libxfixes libxrender xvfb-run xauth
             else
-              apt-get update && apt-get install -y curl unzip libx11-6 libxtst6 libxi6 libxext6 libxfixes3 libxrender1 xvfb xauth
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update && apt-get install -y --no-install-recommends curl unzip libx11-6 libxtst6 libxi6 libxext6 libxfixes3 libxrender1 xvfb xauth
+              rm -rf /var/lib/apt/lists/*
             fi
-            
+
             if [ \"${{ matrix.settings.no_bun }}\" = \"true\" ]; then
               # npm: bun is unavailable on ARM32, so the frozen bun.lock cannot be used here.
               npm install --no-package-lock
@@ -377,9 +393,9 @@ jobs:
     needs:
       - test
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Download all artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: bindings-*
           path: release-binaries
@@ -388,13 +404,13 @@ jobs:
         run: ls -R release-binaries
         shell: bash
       - name: Upload flat artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: all-binaries
           path: release-binaries
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@5113cdc90fd4d541c801c55356214017bf5ae34b # v3
         with:
           files: release-binaries/*.node
           generate_release_notes: true
