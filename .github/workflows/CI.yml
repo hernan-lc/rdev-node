@@ -32,23 +32,23 @@ jobs:
           # MacOS
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: bun run build --target x86_64-apple-darwin
+            build: bun run build
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: bun run build --target aarch64-apple-darwin
+            build: bun run build
 
           # Windows
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            build: bun run build --target x86_64-pc-windows-msvc
+            build: bun run build
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: bun run build --target aarch64-pc-windows-msvc
+            build: bun run build
 
           # Windows (32-bit)
           - host: windows-latest
             target: i686-pc-windows-msvc
-            build: bun run build --target i686-pc-windows-msvc
+            build: bun run build
 
           # Linux Native (x64)
           - host: ubuntu-latest
@@ -56,10 +56,17 @@ jobs:
             build: |
               sudo apt-get update
               sudo apt-get install -y --no-install-recommends libx11-dev libxtst-dev libxi-dev libxext-dev libxfixes-dev libxrender-dev pkg-config
-              bun run build --target x86_64-unknown-linux-gnu
+              bun run build
 
     name: stable - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
+    # NOTE: the target is passed via CARGO_BUILD_TARGET (honored by both cargo
+    # and the napi CLI) instead of `bun run build --target ...`, because bun
+    # appends extra args only to the LAST command of the chained build script,
+    # which would otherwise compile the host target first and upload a stray
+    # host-arch .node file for cross targets.
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.settings.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -104,6 +111,8 @@ jobs:
   build-linux-aarch64-gnu:
     name: stable - aarch64-unknown-linux-gnu
     runs-on: ubuntu-24.04-arm
+    env:
+      CARGO_BUILD_TARGET: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -138,7 +147,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build
-        run: bun run build --target aarch64-unknown-linux-gnu
+        run: bun run build
         shell: bash
 
       - name: Upload artifact
@@ -148,49 +157,73 @@ jobs:
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
-  # Linux ARMv7 GNU - QEMU with Debian container for a native build.
-  # There is no GitHub-hosted ARM32 runner, and cross-compiling the X11
-  # system deps via multiarch is fragile, so QEMU is the recommended
-  # approach here. Must use bookworm (or newer): bullseye is EOL and its
-  # security repo 404s.
+  # Linux ARMv7 GNU - fast cross-compile from x64 in a bookworm container.
+  # There is no GitHub-hosted ARM32 runner; a QEMU-native build works but is
+  # an order of magnitude slower (Rust + LTO under emulation), so this job
+  # cross-compiles with the Debian armhf toolchain instead. Bookworm pins the
+  # glibc sysroot at 2.36 so the artifact runs on Pi OS bookworm and newer.
   build-linux-armv7-gnu:
     name: stable - armv7-unknown-linux-gnueabihf
     runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm-slim
+    env:
+      # Honored by both cargo and the napi CLI (see the `build` job note).
+      CARGO_BUILD_TARGET: armv7-unknown-linux-gnueabihf
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+      CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
+      CXX_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-g++
+      AR_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-ar
+      PKG_CONFIG_ALLOW_CROSS: '1'
+      PKG_CONFIG_LIBDIR: /usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
-        with:
-          platforms: arm
-
-      - name: Build in ARMv7 container
+      - name: Install cross toolchain and armhf system libs
         run: |
-          docker run --rm --platform linux/arm/v7 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            node:22-bookworm-slim bash -c '
-              set -e
-              export DEBIAN_FRONTEND=noninteractive
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture armhf
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates unzip build-essential pkg-config \
+            gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+            libx11-dev:armhf libxtst-dev:armhf libxi-dev:armhf \
+            libxext-dev:armhf libxfixes-dev:armhf libxrender-dev:armhf
+          rm -rf /var/lib/apt/lists/*
 
-              # Install build dependencies
-              apt-get update
-              apt-get install -y --no-install-recommends curl ca-certificates build-essential pkg-config \
-                libx11-dev libxtst-dev libxi-dev \
-                libxext-dev libxfixes-dev libxrender-dev
-              rm -rf /var/lib/apt/lists/*
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
 
-              # Install Rust
-              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-              source $HOME/.cargo/env
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-              # Install dependencies using npm (bun not available on ARM32, so the
-              # frozen bun.lock cannot be used here)
-              npm install --no-package-lock
+      - name: Add target
+        run: |
+          source $HOME/.cargo/env
+          rustup target add armv7-unknown-linux-gnueabihf
 
-              # Build using napi-rs cli directly
-              ./node_modules/.bin/napi build --platform --release --target armv7-unknown-linux-gnueabihf
-            '
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cargo-cache
+            target/
+          key: armv7-unknown-linux-gnueabihf-cargo-bookworm-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: |
+          source $HOME/.cargo/env
+          bun run build
+        shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
