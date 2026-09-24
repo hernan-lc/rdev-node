@@ -330,11 +330,24 @@ jobs:
         node:
           - '22'
           - '24'
-        # The official Node 24 images dropped linux/arm/v7, so ARMv7 can
-        # only be tested on Node 22.
+        # Matrix `exclude` compares whole objects, so the `settings` entries
+        # below must list every key of the matrix entry they exclude.
         exclude:
+          # The official Node 24 images dropped linux/arm/v7, so ARMv7 can
+          # only be tested on Node 22.
           - settings:
+              host: ubuntu-latest
               target: armv7-unknown-linux-gnueabihf
+              docker: true
+              platform: linux/arm/v7
+              no_bun: true
+            node: '24'
+          # Node 24 dropped 32-bit Windows builds, so i686 can only be
+          # tested on Node 22.
+          - settings:
+              host: windows-latest
+              target: i686-pc-windows-msvc
+              architecture: x86
             node: '24'
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -400,7 +413,10 @@ jobs:
               apk add --no-cache bash curl unzip libxtst libx11 libxi libxext libxfixes libxrender xvfb-run xauth
             else
               export DEBIAN_FRONTEND=noninteractive
-              apt-get update && apt-get install -y --no-install-recommends curl unzip libx11-6 libxtst6 libxi6 libxext6 libxfixes3 libxrender1 xvfb xauth
+              # NOTE: ca-certificates must be explicit: the slim image does not
+              # ship it, curl only Recommends it, and --no-install-recommends
+              # skips it -- without it every https download fails with curl (77).
+              apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip libx11-6 libxtst6 libxi6 libxext6 libxfixes3 libxrender1 xvfb xauth
               rm -rf /var/lib/apt/lists/*
             fi
 
@@ -409,7 +425,11 @@ jobs:
               npm install --no-package-lock
               xvfb-run npm run test
             else
-              curl -fsSL https://bun.sh/install | bash
+              # NOTE: download and execute in two steps -- this script runs under
+              # `sh` (no pipefail), so `curl | bash` would swallow curl errors
+              # and fail later with a confusing `bun: not found`.
+              curl -fsSL https://bun.sh/install -o /tmp/bun-install.sh
+              bash /tmp/bun-install.sh
               export BUN_INSTALL=\"\$HOME/.bun\"
               export PATH=\"\$BUN_INSTALL/bin:\$PATH\"
               bun install --frozen-lockfile
